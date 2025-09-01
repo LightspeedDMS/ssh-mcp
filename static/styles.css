@@ -1,0 +1,69 @@
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Fira Code', 'Monaco', 'Consolas', monospace;
+    margin: 0;
+    padding: 0;
+    background-color: #1a1a1a;
+    color: #f0f0f0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+#session-header {
+    background-color: #1a1a1a;
+    padding: 12px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#session-title {
+    color: #f0f0f0;
+    margin: 0;
+    font-size: 1.2em;
+    font-weight: normal;
+}
+
+#connection-status {
+    font-size: 0.9em;
+    color: #f0f0f0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#terminal-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background-color: #1a1a1a;
+    padding: 20px;
+    overflow: hidden;
+}
+
+#terminal {
+    flex: 1;
+    background-color: #1a1a1a;
+    min-height: 0; /* Important for flexbox terminal sizing */
+}
+
+/* Override xterm.js default styles to match our dark theme */
+.xterm {
+    padding: 0;
+    background-color: #1a1a1a !important;
+}
+
+.xterm-viewport {
+    background-color: #1a1a1a !important;
+}
+
+.xterm-screen {
+    background-color: #1a1a1a !important;
+}
+
+/* Clean terminal look - no borders, no boxes */
+* {
+    box-sizing: border-box;
+    border: none;
+    outline: none;
+}
