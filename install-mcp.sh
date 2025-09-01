@@ -51,7 +51,7 @@ fi
 echo -e "${YELLOW}Discovering available port...${NC}"
 
 # Run the server and capture the port discovery output
-SERVER_OUTPUT=$(timeout 15s node dist/src/mcp-server.js 2>&1 | grep "Unified SSH MCP Server started on port:" || true)
+SERVER_OUTPUT=$(timeout 15s node dist/src/mcp-server.js 2>&1 | grep "MCP SSH Server started - MCP: stdio, Web:" || true)
 
 if [ -z "$SERVER_OUTPUT" ]; then
     echo -e "${RED}Error: Failed to discover available port${NC}"
@@ -61,7 +61,7 @@ if [ -z "$SERVER_OUTPUT" ]; then
 fi
 
 # Extract the port number from the output
-DISCOVERED_PORT=$(echo "$SERVER_OUTPUT" | sed 's/.*started on port: \([0-9]*\).*/\1/')
+DISCOVERED_PORT=$(echo "$SERVER_OUTPUT" | sed 's/.*Web: \([0-9]*\).*/\1/')
 
 if [ -z "$DISCOVERED_PORT" ] || ! [[ "$DISCOVERED_PORT" =~ ^[0-9]+$ ]]; then
     echo -e "${RED}Error: Could not parse discovered port from: $SERVER_OUTPUT${NC}"
