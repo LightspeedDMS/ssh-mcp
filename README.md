@@ -168,8 +168,20 @@ For running tests, you need:
 
 The server runs two components in the same process:
 
-- **MCP Server**: Communicates with Claude Code via stdio protocol
+- **MCP Server**: Communicates with Claude Code via stdio protocol (no network port)
 - **Web Server**: Provides browser interface via HTTP and WebSocket on auto-discovered port
+
+### Port Management
+
+- **MCP communication**: Uses stdio transport only (stdin/stdout with Claude Code)
+- **Web interface**: Single auto-discovered port serves both HTTP routes and WebSocket connections
+- **Port discovery**: Installation script discovers available port and stores as `WEB_PORT` environment variable for the MCP server process
+- **Coordination**: Shared SSH session manager enables MCP tools to return monitoring URLs pointing to the web interface
+
+### Deployment Modes
+
+- **Production**: Claude Code automatically starts `mcp-server.js` on-demand when SSH tools are used
+- **Development**: Manual testing via `orchestrator.js` with independent port discovery
 
 Sessions are shared between both components for unified SSH management.
 
