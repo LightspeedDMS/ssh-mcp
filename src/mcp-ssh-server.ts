@@ -21,6 +21,8 @@ interface SSHConnectArgs {
   username: string;
   password?: string;
   privateKey?: string;
+  keyFilePath?: string;
+  passphrase?: string;
 }
 
 interface SSHExecArgs {
@@ -179,7 +181,15 @@ export class MCPSSHServer {
                 },
                 privateKey: {
                   type: "string",
-                  description: "Private key (optional if using password)",
+                  description: "Private key content (optional if using password or keyFilePath)",
+                },
+                keyFilePath: {
+                  type: "string",
+                  description: "Path to SSH private key file (optional if using password or privateKey)",
+                },
+                passphrase: {
+                  type: "string",
+                  description: "Passphrase for encrypted private keys (optional)",
                 },
               },
               required: ["name", "host", "username"],
@@ -293,7 +303,7 @@ export class MCPSSHServer {
   private async handleSSHConnect(
     args: SSHConnectArgs,
   ): Promise<{ content: { type: string; text: string }[] }> {
-    const { name: sessionName, host, username, password, privateKey } = args;
+    const { name: sessionName, host, username, password, privateKey, keyFilePath, passphrase } = args;
 
     if (!sessionName || !host || !username) {
       throw new Error(
@@ -301,8 +311,8 @@ export class MCPSSHServer {
       );
     }
 
-    if (!password && !privateKey) {
-      throw new Error("Either password or privateKey must be provided");
+    if (!password && !privateKey && !keyFilePath) {
+      throw new Error("Either password, privateKey, or keyFilePath must be provided");
     }
 
     const connection = await this.sshManager.createConnection({
@@ -311,6 +321,8 @@ export class MCPSSHServer {
       username,
       password,
       privateKey,
+      keyFilePath,
+      passphrase,
     });
 
     return {

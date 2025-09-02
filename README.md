@@ -66,7 +66,7 @@ The installation script handles port discovery, cleanup of existing configuratio
 
 | Tool | Purpose | Required Parameters |
 |------|---------|-------------------|
-| `ssh_connect` | Establish SSH connection | `name`, `host`, `username`, `password`/`privateKey` |
+| `ssh_connect` | Establish SSH connection | `name`, `host`, `username`, `password`/`privateKey`/`keyFilePath` |
 | `ssh_exec` | Execute commands on remote server | `sessionName`, `command` |
 | `ssh_list_sessions` | List all active SSH sessions | None |
 | `ssh_get_monitoring_url` | Get browser monitoring URL | `sessionName` |
@@ -75,8 +75,19 @@ The installation script handles port discovery, cleanup of existing configuratio
 ### Example Usage
 
 ```bash
-# 1. Connect to a server
+# 1. Connect to a server (multiple authentication methods)
+
+# Option A: Username/password authentication
 ssh_connect name="myserver" host="example.com" username="user" password="pass"
+
+# Option B: SSH key file (recommended)
+ssh_connect name="myserver" host="example.com" username="user" keyFilePath="~/.ssh/id_rsa"
+
+# Option C: SSH key file with passphrase (encrypted key)
+ssh_connect name="myserver" host="example.com" username="user" keyFilePath="~/.ssh/id_ed25519" passphrase="mypassphrase"
+
+# Option D: Direct private key content (legacy)
+ssh_connect name="myserver" host="example.com" username="user" privateKey="-----BEGIN OPENSSH PRIVATE KEY-----..."
 
 # 2. Execute commands
 ssh_exec sessionName="myserver" command="ls -la"
@@ -100,6 +111,45 @@ The browser interface provides:
 - **Command history** with timestamps and exit codes
 - **Real-time streaming** of command execution
 - **Session-specific URLs** for each SSH connection
+
+## SSH Authentication Methods
+
+The server supports multiple SSH authentication methods with automatic fallback:
+
+### 1. SSH Key Files (Recommended)
+- **Best for**: Regular usage, automated deployments, security-conscious users
+- **Supports**: RSA, ED25519, ECDSA key formats
+- **Encryption**: Both encrypted (with passphrase) and unencrypted keys
+- **Path expansion**: Supports tilde expansion (`~/.ssh/id_rsa`)
+
+```bash
+# Unencrypted key
+ssh_connect name="prod" host="server.com" username="deploy" keyFilePath="~/.ssh/id_ed25519"
+
+# Encrypted key with passphrase
+ssh_connect name="secure" host="server.com" username="admin" keyFilePath="~/.ssh/id_rsa" passphrase="mysecretpass"
+```
+
+### 2. Username/Password
+- **Best for**: Quick testing, one-off connections, legacy systems
+- **Security note**: Less secure than key-based authentication
+
+```bash
+ssh_connect name="test" host="server.com" username="user" password="password"
+```
+
+### 3. Direct Private Key Content (Legacy)
+- **Best for**: Programmatic usage, CI/CD systems with key management
+- **Note**: Requires pasting full private key content
+
+```bash
+ssh_connect name="ci" host="server.com" username="deploy" privateKey="-----BEGIN OPENSSH PRIVATE KEY-----..."
+```
+
+### Authentication Priority
+1. `privateKey` (if provided) - highest priority
+2. `keyFilePath` (if provided) - recommended method
+3. `password` (if provided) - fallback method
 
 ## Configuration
 
