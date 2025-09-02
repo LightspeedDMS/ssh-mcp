@@ -11,6 +11,8 @@ export interface SSHConnectionConfig {
   username: string;
   password?: string;
   privateKey?: string;
+  keyFilePath?: string;
+  passphrase?: string;
 }
 
 export interface SSHConnection {

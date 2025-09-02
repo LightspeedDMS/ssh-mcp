@@ -1,4 +1,8 @@
 import { Client, ClientChannel } from "ssh2";
+import * as fs from "fs/promises";
+import * as fsSync from "fs";
+import * as os from "os";
+import * as path from "path";
 import {
   SSHConnection,
   SSHConnectionConfig,
@@ -199,6 +203,23 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       throw new Error(`Session name '${config.name}' already exists`);
     }
 
+    // Process authentication credentials with priority: privateKey > keyFilePath > password
+    let resolvedPrivateKey: string | undefined;
+    
+    if (config.privateKey) {
+      // Priority 1: Use privateKey directly if provided
+      resolvedPrivateKey = config.privateKey;
+    } else if (config.keyFilePath !== undefined) {
+      // Priority 2: Read key from file if keyFilePath is provided
+      try {
+        resolvedPrivateKey = await this.readPrivateKeyFromFile(config.keyFilePath, config.passphrase);
+      } catch (error) {
+        // Sanitize error message to avoid leaking sensitive path information
+        const sanitizedError = this.sanitizeKeyFileError(error as Error);
+        throw new Error(`Failed to read key file: ${sanitizedError}`);
+      }
+    }
+
     const client = new Client();
 
     return new Promise((resolve, reject) => {
@@ -258,15 +279,21 @@ export class SSHConnectionManager implements ISSHConnectionManager {
         username: string;
         password?: string;
         privateKey?: string;
+        passphrase?: string;
       } = {
         host: config.host,
         username: config.username,
       };
 
-      if (config.password) {
+      if (resolvedPrivateKey) {
+        connectConfig.privateKey = resolvedPrivateKey;
+        // Always pass passphrase if provided - let ssh2 library handle encryption detection
+        // The ssh2 library is much better at detecting encrypted keys than our heuristics
+        if (config.passphrase) {
+          connectConfig.passphrase = config.passphrase;
+        }
+      } else if (config.password) {
         connectConfig.password = config.password;
-      } else if (config.privateKey) {
-        connectConfig.privateKey = config.privateKey;
       }
 
       client.connect(connectConfig);
@@ -863,4 +890,260 @@ export class SSHConnectionManager implements ISSHConnectionManager {
         (listener) => listener.callback !== callback,
       );
   }
+
+  /**
+   * Read private key from file with path expansion and optional decryption
+   * @param keyFilePath - Path to the private key file (supports tilde expansion)
+   * @param passphrase - Optional passphrase for encrypted keys
+   * @returns Promise<string> - The private key content
+   * @throws Error - If file cannot be read or key cannot be decrypted
+   */
+  private async readPrivateKeyFromFile(keyFilePath: string, passphrase?: string): Promise<string> {
+    // Validate input parameters
+    this.validateKeyFilePath(keyFilePath);
+    
+    // Expand tilde path to full home directory path with security checks
+    const expandedPath = this.expandTildePath(keyFilePath);
+    
+    // Validate the expanded path for security
+    this.validateExpandedPath(expandedPath);
+    
+    // Check if file exists using async operations
+    try {
+      await fs.access(expandedPath, fsSync.constants.R_OK);
+    } catch (error) {
+      throw new Error('Key file not accessible');
+    }
+
+    // Read the key file content asynchronously
+    let keyContent: string;
+    try {
+      keyContent = await fs.readFile(expandedPath, 'utf8');
+    } catch (error) {
+      throw new Error('Cannot read key file');
+    }
+
+    // Check if key is encrypted
+    if (this.isKeyEncrypted(keyContent)) {
+      if (!passphrase) {
+        throw new Error('Key is encrypted but no passphrase provided');
+      }
+      
+      // Return encrypted key content - SSH2 will handle decryption with passphrase
+      return keyContent;
+    }
+
+    return keyContent;
+  }
+
+  /**
+   * Expand tilde (~) in file paths to full home directory path with security checks
+   * @param filePath - File path that may contain tilde
+   * @returns Expanded absolute path
+   * @throws Error - If path contains dangerous traversal patterns
+   */
+  private expandTildePath(filePath: string): string {
+    // Normalize path separators and resolve any relative components
+    const normalizedPath = path.normalize(filePath);
+    
+    // Check for path traversal attempts
+    if (normalizedPath.includes('..')) {
+      throw new Error('Invalid path: path traversal attempts are not allowed');
+    }
+    
+    if (normalizedPath.startsWith('~')) {
+      const homeDir = os.homedir();
+      const expandedPath = path.join(homeDir, normalizedPath.slice(1));
+      
+      // Ensure expanded path is still within or relative to home directory for tilde expansion
+      const resolvedPath = path.resolve(expandedPath);
+      const resolvedHome = path.resolve(homeDir);
+      
+      // Allow paths in home directory or relative paths that don't escape upward
+      if (!resolvedPath.startsWith(resolvedHome) && normalizedPath.includes('..')) {
+        throw new Error('Invalid path: cannot access paths outside home directory with tilde expansion');
+      }
+      
+      return resolvedPath;
+    }
+    
+    // For non-tilde paths, resolve but check for suspicious patterns
+    return path.resolve(normalizedPath);
+  }
+
+  /**
+   * Validate keyFilePath input parameter
+   * @param keyFilePath - The key file path to validate
+   * @throws Error - If path is invalid
+   */
+  private validateKeyFilePath(keyFilePath: string): void {
+    if (!keyFilePath || typeof keyFilePath !== 'string') {
+      throw new Error('Invalid keyFilePath: must be a non-empty string');
+    }
+    
+    const trimmed = keyFilePath.trim();
+    if (trimmed === '') {
+      throw new Error('Invalid keyFilePath: cannot be empty or whitespace-only');
+    }
+    
+    // Check for reasonable path length (prevent potential DoS)
+    if (trimmed.length > 4096) {
+      throw new Error('Invalid keyFilePath: path too long');
+    }
+  }
+  
+  /**
+   * Validate the expanded file path for security concerns
+   * @param expandedPath - The resolved absolute path
+   * @throws Error - If path is potentially dangerous
+   */
+  private validateExpandedPath(expandedPath: string): void {
+    // Block access to sensitive system directories
+    const dangerousPaths = [
+      '/etc/',
+      '/proc/',
+      '/sys/',
+      '/dev/',
+      '/boot/',
+      '/root/'
+    ];
+    
+    for (const dangerousPath of dangerousPaths) {
+      if (expandedPath.startsWith(dangerousPath)) {
+        throw new Error('Invalid path: access to system directories is not allowed');
+      }
+    }
+    
+    // Check for symlink attacks by ensuring we can resolve the path safely
+    try {
+      // Check if the file itself is a symlink
+      const stats = fsSync.lstatSync(expandedPath);
+      if (stats.isSymbolicLink()) {
+        const realTarget = fsSync.readlinkSync(expandedPath);
+        const resolvedTarget = path.resolve(path.dirname(expandedPath), realTarget);
+        
+        // Check if symlink points to dangerous locations
+        for (const dangerousPath of dangerousPaths) {
+          if (resolvedTarget.startsWith(dangerousPath)) {
+            throw new Error('Invalid path: symlink points to restricted location');
+          }
+        }
+      }
+      
+      // Also check the directory path for symlinks
+      const realPath = fsSync.realpathSync(path.dirname(expandedPath));
+      const resolvedFilePath = path.join(realPath, path.basename(expandedPath));
+      
+      // Re-check dangerous paths after full resolution
+      for (const dangerousPath of dangerousPaths) {
+        if (resolvedFilePath.startsWith(dangerousPath)) {
+          throw new Error('Invalid path: resolved path points to restricted location');
+        }
+      }
+    } catch (error) {
+      // If it's our security error, re-throw it
+      if (error instanceof Error && error.message.includes('Invalid path')) {
+        throw error;
+      }
+      // Directory doesn't exist or is inaccessible - this is handled elsewhere
+      // We only care about blocking access to existing dangerous paths
+    }
+  }
+  
+  /**
+   * Sanitize key file error messages to prevent path information leakage
+   * @param error - The original error
+   * @returns Sanitized error message
+   */
+  private sanitizeKeyFileError(error: Error): string {
+    const message = error.message;
+    
+    // Remove any absolute paths from error messages
+    const pathPattern = /\/[\w\-._/]+/g;
+    let sanitizedMessage = message.replace(pathPattern, '<path>');
+    
+    // Remove home directory references
+    const homeDir = os.homedir();
+    if (homeDir) {
+      sanitizedMessage = sanitizedMessage.replace(new RegExp(homeDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), '<home>');
+    }
+    
+    // Provide generic messages for common error types
+    if (message.includes('ENOENT') || message.includes('not found')) {
+      return 'Key file not accessible';
+    }
+    
+    if (message.includes('EACCES') || message.includes('permission denied')) {
+      return 'Permission denied accessing key file';
+    }
+    
+    if (message.includes('Invalid path')) {
+      return sanitizedMessage; // Keep security validation messages
+    }
+    
+    // For other errors, return a generic message
+    return sanitizedMessage || 'Key file error';
+  }
+  
+  /**
+   * Check if a private key is encrypted
+   * @param keyContent - The private key content
+   * @returns boolean - True if key is encrypted
+   */
+  private isKeyEncrypted(keyContent: string): boolean {
+    // Check for traditional encrypted key formats
+    const hasTraditionalEncryption = (
+      keyContent.includes('Proc-Type: 4,ENCRYPTED') ||
+      keyContent.includes('DEK-Info:') ||
+      keyContent.match(/-----BEGIN ENCRYPTED PRIVATE KEY-----/) !== null ||
+      keyContent.match(/-----BEGIN [\w\s]+ PRIVATE KEY-----[\s\S]*?Proc-Type: 4,ENCRYPTED/) !== null
+    );
+    
+    if (hasTraditionalEncryption) {
+      return true;
+    }
+    
+    // Check for OpenSSH new format encrypted keys
+    if (keyContent.includes('-----BEGIN OPENSSH PRIVATE KEY-----')) {
+      try {
+        // Extract the base64 content between the headers
+        const lines = keyContent.split('\n');
+        const base64Lines = lines.filter(line => 
+          line.trim() && 
+          !line.includes('-----BEGIN') && 
+          !line.includes('-----END')
+        );
+        const base64Content = base64Lines.join('');
+        
+        // Decode the base64 content to check for encryption indicators
+        const binaryData = Buffer.from(base64Content, 'base64');
+        const headerString = binaryData.toString('ascii', 0, Math.min(200, binaryData.length));
+        
+        // OpenSSH new format encrypted keys contain these patterns in the decoded data:
+        // - openssh-key-v1 header
+        // - encryption cipher names (aes128-ctr, aes192-ctr, aes256-ctr, aes128-gcm, aes256-gcm, etc.)
+        // - key derivation functions (bcrypt)
+        const hasOpenSSHEncryption = (
+          headerString.includes('openssh-key-v1') && (
+            headerString.includes('aes128-ctr') ||
+            headerString.includes('aes192-ctr') ||
+            headerString.includes('aes256-ctr') ||
+            headerString.includes('aes128-gcm') ||
+            headerString.includes('aes256-gcm') ||
+            headerString.includes('chacha20-poly1305') ||
+            headerString.includes('bcrypt')
+          )
+        );
+        
+        return hasOpenSSHEncryption;
+      } catch (error) {
+        // If we can't decode the key content, assume it might be encrypted for safety
+        // Better to ask for a passphrase when not needed than to fail silently
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
 }

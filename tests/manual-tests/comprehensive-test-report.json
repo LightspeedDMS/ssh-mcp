@@ -1,0 +1,209 @@
+{
+  "executionSummary": {
+    "executionDate": "2025-09-02T04:24:11.960Z",
+    "environment": {
+      "hostname": "localhost.localdomain",
+      "platform": "linux",
+      "architecture": "x64",
+      "nodeVersion": "v22.16.0"
+    },
+    "duration": 76740,
+    "statistics": {
+      "total": 8,
+      "passed": 5,
+      "failed": 3,
+      "successRate": 62.5
+    }
+  },
+  "testResults": [
+    {
+      "testNumber": 1,
+      "testId": "TC01",
+      "name": "Basic SSH Key File Authentication (Unencrypted RSA)",
+      "startTime": "2025-09-02T04:22:55.640Z",
+      "success": true,
+      "error": null,
+      "duration": 11281,
+      "details": [
+        "Connection attempt: SUCCESS",
+        "Command execution: SUCCESS",
+        "Command output: No output",
+        "Session cleanup: Disconnected"
+      ],
+      "evidence": [
+        "Connect result: {\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"success\\\": true,\\n  \\\"connection\\\": {\\n    \\\"name\\\": \\\"test_rsa_unenc\\\",\\n    \\\"host\\\": \\\"localhost\\\",\\n    \\\"username\\\": \\\"test_user\\\",\\n    \\\"status\\\": \\\"connected\\\",\\n    \\\"lastActivity\\\": \\\"2025-09-02T04:22:55.788Z\\\"\\n  }\\n}\"}]}",
+        "Execution output: undefined"
+      ],
+      "endTime": "2025-09-02T04:23:06.921Z"
+    },
+    {
+      "testNumber": 2,
+      "testId": "TC02",
+      "name": "Encrypted SSH Key with Correct Passphrase",
+      "startTime": "2025-09-02T04:23:07.922Z",
+      "success": true,
+      "error": null,
+      "duration": 9800,
+      "details": [
+        "Encrypted key connection: SUCCESS",
+        "Command execution: SUCCESS",
+        "Encrypted key properly decrypted and authenticated",
+        "Session cleanup: Disconnected"
+      ],
+      "evidence": [
+        "Connect result: {\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"success\\\": true,\\n  \\\"connection\\\": {\\n    \\\"name\\\": \\\"test_rsa_enc\\\",\\n    \\\"host\\\": \\\"localhost\\\",\\n    \\\"username\\\": \\\"test_user\\\",\\n    \\\"status\\\": \\\"connected\\\",\\n    \\\"lastActivity\\\": \\\"2025-09-02T04:23:08.408Z\\\"\\n  }\\n}\"}]}",
+        "Command verified authorized_keys access"
+      ],
+      "endTime": "2025-09-02T04:23:17.722Z"
+    },
+    {
+      "testNumber": 3,
+      "testId": "TC03",
+      "name": "ED25519 Key Algorithm Support",
+      "startTime": "2025-09-02T04:23:18.723Z",
+      "success": true,
+      "error": null,
+      "duration": 18254,
+      "details": [
+        "ED25519 unencrypted: SUCCESS",
+        "ED25519 command execution: SUCCESS",
+        "ED25519 encrypted: SUCCESS",
+        "ED25519 encrypted command execution: SUCCESS"
+      ],
+      "evidence": [
+        "ED25519 unencrypted result: {\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"success\\\": true,\\n  \\\"connection\\\": {\\n    \\\"name\\\": \\\"test_ed25519_unenc\\\",\\n    \\\"host\\\": \\\"localhost\\\",\\n    \\\"username\\\": \\\"test_user\\\",\\n    \\\"status\\\": \\\"connected\\\",\\n    \\\"lastActivity\\\": \\\"2025-09-02T04:23:18.811Z\\\"\\n  }\\n}\"}]}",
+        "ED25519 encrypted result: {\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"success\\\": true,\\n  \\\"connection\\\": {\\n    \\\"name\\\": \\\"test_ed25519_enc\\\",\\n    \\\"host\\\": \\\"localhost\\\",\\n    \\\"username\\\": \\\"test_user\\\",\\n    \\\"status\\\": \\\"connected\\\",\\n    \\\"lastActivity\\\": \\\"2025-09-02T04:23:28.007Z\\\"\\n  }\\n}\"}]}"
+      ],
+      "endTime": "2025-09-02T04:23:36.977Z"
+    },
+    {
+      "testNumber": 4,
+      "testId": "TC04",
+      "name": "Path Traversal Security Protection",
+      "startTime": "2025-09-02T04:23:37.977Z",
+      "success": false,
+      "error": "CRITICAL SECURITY ISSUE: Path traversal was not blocked",
+      "duration": 3,
+      "details": [
+        "Path traversal blocked: SECURITY FAILURE"
+      ],
+      "evidence": [
+        "Path traversal attempt result: {\"success\":true,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"success\\\": false,\\n  \\\"error\\\": \\\"Failed to read key file: Invalid path: path traversal attempts are not allowed\\\"\\n}\"}],\"isError\":true}}"
+      ],
+      "endTime": "2025-09-02T04:23:37.980Z"
+    },
+    {
+      "testNumber": 5,
+      "testId": "TC05",
+      "name": "Invalid Key File Handling",
+      "startTime": "2025-09-02T04:23:38.982Z",
+      "success": false,
+      "error": "Only 0/3 invalid file tests passed",
+      "duration": 9,
+      "details": [
+        "Non-existent file rejected: FAILED",
+        "Invalid key content rejected: FAILED",
+        "Restricted permissions rejected: FAILED",
+        "Overall invalid file handling: 0/3 tests passed"
+      ],
+      "evidence": [
+        "Non-existent file error: \"undefined\"",
+        "Invalid key content error: \"undefined\"",
+        "Restricted permissions error: \"undefined\""
+      ],
+      "endTime": "2025-09-02T04:23:38.991Z"
+    },
+    {
+      "testNumber": 6,
+      "testId": "TC06",
+      "name": "Incorrect Passphrase Handling",
+      "startTime": "2025-09-02T04:23:39.993Z",
+      "success": false,
+      "error": "Some passphrase handling tests failed",
+      "duration": 322,
+      "details": [
+        "Wrong passphrase rejected: FAILED",
+        "Missing passphrase rejected: FAILED",
+        "Passphrase handling tests: 0/2 passed"
+      ],
+      "evidence": [
+        "Wrong passphrase error: \"undefined\"",
+        "Missing passphrase error: \"undefined\""
+      ],
+      "endTime": "2025-09-02T04:23:40.315Z"
+    },
+    {
+      "testNumber": 7,
+      "testId": "TC07",
+      "name": "Backward Compatibility - privateKey Parameter",
+      "startTime": "2025-09-02T04:23:41.316Z",
+      "success": true,
+      "error": null,
+      "duration": 8764,
+      "details": [
+        "Private key file read: 1831 characters",
+        "Legacy privateKey parameter: SUCCESS",
+        "Legacy parameter command execution: SUCCESS",
+        "Legacy session cleanup: Disconnected"
+      ],
+      "evidence": [
+        "Legacy connection result: {\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"success\\\": true,\\n  \\\"connection\\\": {\\n    \\\"name\\\": \\\"legacy_privatekey\\\",\\n    \\\"host\\\": \\\"localhost\\\",\\n    \\\"username\\\": \\\"test_user\\\",\\n    \\\"status\\\": \\\"connected\\\",\\n    \\\"lastActivity\\\": \\\"2025-09-02T04:23:41.409Z\\\"\\n  }\\n}\"}]}",
+        "Legacy command output: undefined"
+      ],
+      "endTime": "2025-09-02T04:23:50.080Z"
+    },
+    {
+      "testNumber": 8,
+      "testId": "TC08",
+      "name": "Concurrent Sessions with Different Key Types",
+      "startTime": "2025-09-02T04:23:51.081Z",
+      "success": true,
+      "error": null,
+      "duration": 19877,
+      "details": [
+        "RSA session: SUCCESS",
+        "ED25519 session: SUCCESS",
+        "RSA session command: SUCCESS",
+        "ED25519 session command: SUCCESS",
+        "Session listing: SUCCESS",
+        "Found 2 active sessions",
+        "concurrent_rsa cleanup: Disconnected",
+        "concurrent_ed25519 cleanup: Disconnected"
+      ],
+      "evidence": [
+        "Active sessions: concurrent_rsa, concurrent_ed25519"
+      ],
+      "endTime": "2025-09-02T04:24:10.958Z"
+    }
+  ],
+  "conclusions": {
+    "overallStatus": "ISSUES FOUND",
+    "criticalIssues": [
+      {
+        "test": "Path Traversal Security Protection",
+        "error": "CRITICAL SECURITY ISSUE: Path traversal was not blocked",
+        "impact": "HIGH - Security vulnerability"
+      },
+      {
+        "test": "Invalid Key File Handling",
+        "error": "Only 0/3 invalid file tests passed",
+        "impact": "MEDIUM - Poor error handling"
+      },
+      {
+        "test": "Incorrect Passphrase Handling",
+        "error": "Some passphrase handling tests failed",
+        "impact": "HIGH - Core functionality broken"
+      }
+    ],
+    "functionalityStatus": {
+      "basicKeyAuth": true,
+      "encryptedKeyAuth": true,
+      "backwardCompatibility": true,
+      "securityFeatures": false,
+      "errorHandling": false
+    },
+    "recommendations": [
+      "❌ 3 test(s) failed. Review and fix issues before production deployment."
+    ]
+  }
+}
