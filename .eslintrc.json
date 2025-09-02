@@ -7,9 +7,7 @@
     "project": "./tsconfig.json"
   },
   "plugins": ["@typescript-eslint"],
-  "extends": [
-    "eslint:recommended"
-  ],
+  "extends": ["eslint:recommended"],
   "rules": {
     "@typescript-eslint/no-unused-vars": "error",
     "@typescript-eslint/no-explicit-any": "error",
@@ -34,7 +32,8 @@
       "extends": ["eslint:recommended"],
       "globals": {
         "Terminal": "readonly",
-        "WebSocket": "readonly"
+        "WebSocket": "readonly",
+        "FitAddon": "readonly"
       },
       "rules": {
         "no-unused-vars": "error",
@@ -65,6 +64,17 @@
         "@typescript-eslint/no-explicit-any": "off",
         "@typescript-eslint/explicit-function-return-type": "off",
         "@typescript-eslint/no-floating-promises": "off"
+      }
+    },
+    {
+      "files": ["tests/**/*.ts"],
+      "rules": {
+        "@typescript-eslint/no-explicit-any": "off",
+        "@typescript-eslint/explicit-function-return-type": "off",
+        "no-undef": "off"
+      },
+      "globals": {
+        "fail": "readonly"
       }
     }
   ]
