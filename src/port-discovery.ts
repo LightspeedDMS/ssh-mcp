@@ -1,35 +1,37 @@
-import * as net from 'net';
+import * as net from "net";
 
 /**
  * Find an available port starting from a base port
  */
-export async function findAvailablePort(startPort: number = 8080): Promise<number> {
+export async function findAvailablePort(
+  startPort: number = 8080,
+): Promise<number> {
   if (startPort < 1 || startPort > 65535) {
-    throw new Error('Invalid port: must be between 1 and 65535');
+    throw new Error("Invalid port: must be between 1 and 65535");
   }
 
   return new Promise((resolve, reject) => {
     function tryPort(port: number): void {
       if (port > 65534) {
-        reject(new Error('No available ports found in range'));
+        reject(new Error("No available ports found in range"));
         return;
       }
 
       const server = net.createServer();
-      
+
       server.listen(port, () => {
         const assignedPort = (server.address() as net.AddressInfo)?.port;
         server.close(() => {
           if (assignedPort) {
             resolve(assignedPort);
           } else {
-            reject(new Error('Failed to get assigned port'));
+            reject(new Error("Failed to get assigned port"));
           }
         });
       });
-      
-      server.on('error', (err: NodeJS.ErrnoException) => {
-        if (err.code === 'EADDRINUSE') {
+
+      server.on("error", (err: { code?: string } & Error) => {
+        if (err.code === "EADDRINUSE") {
           // Port is in use, try next port
           tryPort(port + 1);
         } else {
@@ -37,7 +39,7 @@ export async function findAvailablePort(startPort: number = 8080): Promise<numbe
         }
       });
     }
-    
+
     tryPort(startPort);
   });
 }
@@ -54,19 +56,19 @@ export class PortManager {
    */
   async reservePort(preferredPort: number): Promise<number> {
     if (preferredPort < 1 || preferredPort > 65535) {
-      throw new Error('Invalid port: must be between 1 and 65535');
+      throw new Error("Invalid port: must be between 1 and 65535");
     }
 
     // Ensure sequential port reservation to avoid race conditions
     await this.portLock;
-    
+
     this.portLock = this._reservePortInternal(preferredPort);
     return this.portLock;
   }
 
   private async _reservePortInternal(preferredPort: number): Promise<number> {
     let currentPort = preferredPort;
-    
+
     while (currentPort <= 65535) {
       if (this.reservedPorts.has(currentPort)) {
         currentPort++;
@@ -79,7 +81,7 @@ export class PortManager {
         this.reservedPorts.add(currentPort);
         return currentPort;
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') {
+        if ((error as { code?: string } & Error).code === "EADDRINUSE") {
           currentPort++;
           continue;
         } else {
@@ -88,7 +90,7 @@ export class PortManager {
       }
     }
 
-    throw new Error('No available ports found in range');
+    throw new Error("No available ports found in range");
   }
 
   /**
@@ -96,11 +98,11 @@ export class PortManager {
    */
   async reservePortDirectly(port: number): Promise<number> {
     if (port < 1 || port > 65535) {
-      throw new Error('Invalid port: must be between 1 and 65535');
+      throw new Error("Invalid port: must be between 1 and 65535");
     }
 
     if (this.reservedPorts.has(port)) {
-      throw new Error('Port already reserved');
+      throw new Error("Port already reserved");
     }
 
     this.reservedPorts.add(port);
@@ -110,12 +112,12 @@ export class PortManager {
   private testPortAvailability(port: number): Promise<void> {
     return new Promise((resolve, reject) => {
       const server = net.createServer();
-      
+
       server.listen(port, () => {
         server.close(() => resolve());
       });
-      
-      server.on('error', reject);
+
+      server.on("error", reject);
     });
   }
 

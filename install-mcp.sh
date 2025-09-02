@@ -50,13 +50,13 @@ fi
 # Start the server briefly to discover the port
 echo -e "${YELLOW}Discovering available port...${NC}"
 
-# Run the server and capture the port discovery output
-SERVER_OUTPUT=$(timeout 15s node dist/src/mcp-server.js 2>&1 | grep "MCP SSH Server started - MCP: stdio, Web:" || true)
+# Run the orchestrator briefly to discover the port (pure MCP server doesn't output port info)
+SERVER_OUTPUT=$(timeout 15s node dist/src/orchestrator.js 2>&1 | grep "MCP SSH Server started - MCP: stdio, Web:" || true)
 
 if [ -z "$SERVER_OUTPUT" ]; then
     echo -e "${RED}Error: Failed to discover available port${NC}"
     echo -e "${RED}Server output (if any):${NC}"
-    timeout 15s node dist/src/mcp-server.js 2>&1 | head -10 || true
+    timeout 15s node dist/src/orchestrator.js 2>&1 | head -10 || true
     exit 1
 fi
 

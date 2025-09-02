@@ -1,5 +1,14 @@
 dist/
 node_modules/
 coverage/
+debug/
 *.d.ts
 *.js.map
+# Third-party vendor files
+static/xterm.js
+static/xterm-addon-fit.js
+# Legacy standalone files
+ssh-mcp-persistent.js
+standalone-server.js
+# Test files with special configurations
+tests/

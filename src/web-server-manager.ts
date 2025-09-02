@@ -1,8 +1,11 @@
-import { SSHConnectionManager } from './ssh-connection-manager.js';
-import { PortManager } from './port-discovery.js';
-import * as http from 'http';
-import express from 'express';
-import { WebSocketServer } from 'ws';
+import {
+  SSHConnectionManager,
+  TerminalOutputEntry,
+} from "./ssh-connection-manager.js";
+import { PortManager } from "./port-discovery.js";
+import * as http from "http";
+import express from "express";
+import { WebSocketServer } from "ws";
 
 export interface WebServerManagerConfig {
   port?: number;
@@ -22,24 +25,27 @@ export class WebServerManager {
   private webPort?: number;
   private running = false;
 
-  constructor(sshManager: SSHConnectionManager, config: WebServerManagerConfig = {}) {
+  constructor(
+    sshManager: SSHConnectionManager,
+    config: WebServerManagerConfig = {},
+  ) {
     this.validateConfig(config);
-    
+
     this.config = {
       port: config.port,
-      ...config
+      ...config,
     };
 
     this.sshManager = sshManager;
     this.portManager = new PortManager();
     this.app = express();
-    
+
     this.setupExpressRoutes();
   }
 
   private validateConfig(config: WebServerManagerConfig): void {
     if (config.port !== undefined && (config.port < 1 || config.port > 65535)) {
-      throw new Error('Invalid port: must be between 1 and 65535');
+      throw new Error("Invalid port: must be between 1 and 65535");
     }
   }
 
@@ -54,7 +60,9 @@ export class WebServerManager {
       this.running = true;
     } catch (error) {
       await this.cleanup();
-      throw new Error(`Failed to start web server: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Failed to start web server: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
@@ -77,35 +85,41 @@ export class WebServerManager {
 
   private async startHttpServer(): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.httpServer = this.app.listen(this.webPort, (error?: Error | undefined) => {
-        if (error) {
-          if (error.message.includes('EADDRINUSE')) {
+      this.httpServer = this.app.listen(
+        this.webPort,
+        (error?: Error | undefined) => {
+          if (error) {
+            if (error.message.includes("EADDRINUSE")) {
+              reject(new Error(`Port ${this.webPort} is already in use`));
+            } else {
+              reject(error);
+            }
+            return;
+          }
+          resolve();
+        },
+      );
+
+      this.httpServer.on(
+        "error",
+        (error: { code?: string; message: string }) => {
+          if (error.code === "EADDRINUSE") {
             reject(new Error(`Port ${this.webPort} is already in use`));
           } else {
             reject(error);
           }
-          return;
-        }
-        resolve();
-      });
-
-      this.httpServer.on('error', (error: { code?: string; message: string }) => {
-        if (error.code === 'EADDRINUSE') {
-          reject(new Error(`Port ${this.webPort} is already in use`));
-        } else {
-          reject(error);
-        }
-      });
+        },
+      );
     });
   }
 
   private setupExpressRoutes(): void {
     // Serve static files for web interface
-    const staticPath = './static';
+    const staticPath = "./static";
     this.app.use(express.static(staticPath));
-    
+
     // Handle root route
-    this.app.get('/', (_, res) => {
+    this.app.get("/", (_, res) => {
       res.send(`
         <html>
           <head><title>SSH MCP Server</title></head>
@@ -117,62 +131,150 @@ export class WebServerManager {
         </html>
       `);
     });
-    
+
     // Handle session-specific routes
-    this.app.get('/session/:sessionName', (req, res) => {
+    this.app.get("/session/:sessionName", (req, res) => {
       const sessionName = req.params.sessionName;
-      
+
       // Validate session exists
       if (!this.sshManager.hasSession(sessionName)) {
-        res.status(404).send('Session not found');
+        res.status(404).send("Session not found");
         return;
       }
-      
+
       res.send(`
-        <html>
-          <head><title>SSH Session: ${sessionName}</title></head>
-          <body>
-            <h1>SSH Session: ${sessionName}</h1>
-            <p>WebSocket endpoint: ws://localhost:${this.webPort}/ws/session/${sessionName}</p>
-          </body>
-        </html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSH MCP Terminal Viewer</title>
+    <link rel="stylesheet" href="/xterm.css" />
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <div id="session-header">
+        <h1 id="session-title">SSH Session: ${sessionName}</h1>
+        <div id="connection-status">🟢 Connected</div>
+    </div>
+    
+    <div id="terminal-container">
+        <div id="terminal"></div>
+    </div>
+    
+    <script src="/xterm.js"></script>
+    <script src="/xterm-addon-fit.js"></script>
+    <script>
+        const sessionName = '${sessionName}';
+        const wsUrl = \`ws://localhost:${this.webPort}/ws/session/\${sessionName}\`;
+        
+        // Initialize terminal
+        const term = new Terminal({
+            theme: {
+                background: '#000000',
+                foreground: '#ffffff',
+                cursor: '#ffffff',
+                selection: '#ffffff'
+            },
+            fontSize: 14,
+            fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
+            cursorBlink: true
+        });
+        
+        const fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        
+        term.open(document.getElementById('terminal'));
+        fitAddon.fit();
+        
+        // WebSocket connection
+        const ws = new WebSocket(wsUrl);
+        
+        ws.onopen = function() {
+            console.log('WebSocket connected to:', wsUrl);
+            document.getElementById('connection-status').innerHTML = '🟢 Connected';
+        };
+        
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            if (data.type === 'terminal_output') {
+                term.write(data.data);
+            }
+        };
+        
+        ws.onclose = function() {
+            document.getElementById('connection-status').innerHTML = '🔴 Disconnected';
+        };
+        
+        ws.onerror = function(error) {
+            console.error('WebSocket error:', error);
+            document.getElementById('connection-status').innerHTML = '⚠️ Error';
+        };
+        
+        // Handle terminal input
+        term.onData(function(data) {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'terminal_input',
+                    sessionName: sessionName,
+                    data: data
+                }));
+            }
+        });
+        
+        // Auto-resize terminal
+        window.addEventListener('resize', () => {
+            fitAddon.fit();
+        });
+    </script>
+</body>
+</html>
       `);
     });
   }
 
   private setupWebSocketServer(): void {
     if (!this.httpServer) {
-      throw new Error('HTTP server must be started before WebSocket server');
+      throw new Error("HTTP server must be started before WebSocket server");
     }
 
-    this.wss = new WebSocketServer({ 
+    this.wss = new WebSocketServer({
       server: this.httpServer,
-      verifyClient: (info: { origin: string; secure: boolean; req: http.IncomingMessage }) => {
+      verifyClient: (info: {
+        origin: string;
+        secure: boolean;
+        req: http.IncomingMessage;
+      }): boolean => {
         const url = new URL(info.req.url!, `http://${info.req.headers.host}`);
-        
-        if (url.pathname === '/ws/monitoring') {
+
+        if (url.pathname === "/ws/monitoring") {
           return true;
         }
-        
-        if (url.pathname.startsWith('/ws/session/')) {
+
+        if (url.pathname.startsWith("/ws/session/")) {
           const sessionMatch = url.pathname.match(/^\/ws\/session\/(.+)$/);
           if (sessionMatch) {
             const sessionName = decodeURIComponent(sessionMatch[1]);
             return this.sshManager.hasSession(sessionName);
           }
         }
-        
+
         return false;
-      }
+      },
     });
 
-    this.wss.on('connection', (ws, req) => {
+    this.wss.on("connection", (ws, req) => {
       const url = new URL(req.url!, `http://${req.headers.host}`);
-      
-      if (url.pathname === '/ws/monitoring') {
+
+      if (url.pathname === "/ws/monitoring") {
         // General monitoring connection
-        ws.send(JSON.stringify({ type: 'connected', message: 'Monitoring connection established' }));
-      } else if (url.pathname.startsWith('/ws/session/')) {
+        ws.send(
+          JSON.stringify({
+            type: "connected",
+            message: "Monitoring connection established",
+          }),
+        );
+      } else if (url.pathname.startsWith("/ws/session/")) {
         // Session-specific connection
         const sessionMatch = url.pathname.match(/^\/ws\/session\/(.+)$/);
         if (sessionMatch) {
@@ -183,61 +285,94 @@ export class WebServerManager {
     });
   }
 
-  private setupSessionWebSocket(ws: import('ws').WebSocket, sessionName: string): void {
+  private setupSessionWebSocket(
+    ws: import("ws").WebSocket,
+    sessionName: string,
+  ): void {
     // Auto-subscribe to session terminal output
     if (this.sshManager.hasSession(sessionName)) {
-      const outputCallback = (entry: any) => {
+      const outputCallback = (entry: TerminalOutputEntry): void => {
         if (ws.readyState === ws.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'terminal_output',
-            sessionName,
-            timestamp: new Date(entry.timestamp).toISOString(),
-            data: entry.output
-          }));
+          ws.send(
+            JSON.stringify({
+              type: "terminal_output",
+              sessionName,
+              timestamp: new Date(entry.timestamp).toISOString(),
+              data: entry.output,
+            }),
+          );
         }
       };
 
       try {
         this.sshManager.addTerminalOutputListener(sessionName, outputCallback);
 
-        ws.on('close', () => {
-          this.sshManager.removeTerminalOutputListener(sessionName, outputCallback);
+        // Send historical terminal output to new client
+        const history = this.sshManager.getTerminalHistory(sessionName);
+        history.forEach((entry) => {
+          if (ws.readyState === ws.OPEN) {
+            ws.send(
+              JSON.stringify({
+                type: "terminal_output",
+                sessionName,
+                timestamp: new Date(entry.timestamp).toISOString(),
+                data: entry.output,
+              }),
+            );
+          }
         });
 
-        ws.on('error', () => {
-          this.sshManager.removeTerminalOutputListener(sessionName, outputCallback);
+        ws.on("close", () => {
+          this.sshManager.removeTerminalOutputListener(
+            sessionName,
+            outputCallback,
+          );
+        });
+
+        ws.on("error", () => {
+          this.sshManager.removeTerminalOutputListener(
+            sessionName,
+            outputCallback,
+          );
         });
       } catch (error) {
         // Handle listener setup errors gracefully - log but don't crash
-        console.error('Error setting up terminal output listener:', error instanceof Error ? error.message : String(error));
+        console.error(
+          "Error setting up terminal output listener:",
+          error instanceof Error ? error.message : String(error),
+        );
       }
     }
   }
 
   private async cleanup(): Promise<void> {
-    const cleanupPromises: Promise<any>[] = [];
+    const cleanupPromises: Promise<void>[] = [];
 
     // Close WebSocket server
     if (this.wss) {
-      cleanupPromises.push(new Promise<void>((resolve) => {
-        this.wss!.close(() => {
-          this.wss = undefined;
-          resolve();
-        });
-      }));
+      cleanupPromises.push(
+        new Promise<void>((resolve) => {
+          this.wss!.close(() => {
+            this.wss = undefined;
+            resolve();
+          });
+        }),
+      );
     }
 
     // Close HTTP server
     if (this.httpServer) {
-      cleanupPromises.push(new Promise<void>((resolve, reject) => {
-        this.httpServer!.close((error) => {
-          if (error) reject(error);
-          else {
-            this.httpServer = undefined;
-            resolve();
-          }
-        });
-      }));
+      cleanupPromises.push(
+        new Promise<void>((resolve, reject) => {
+          this.httpServer!.close((error) => {
+            if (error) reject(error);
+            else {
+              this.httpServer = undefined;
+              resolve();
+            }
+          });
+        }),
+      );
     }
 
     // Release port reservation
@@ -247,7 +382,10 @@ export class WebServerManager {
 
     await Promise.all(cleanupPromises).catch((error) => {
       // Log cleanup errors but don't throw - cleanup should be graceful
-      console.error('Error during web server cleanup:', error instanceof Error ? error.message : String(error));
+      console.error(
+        "Error during web server cleanup:",
+        error instanceof Error ? error.message : String(error),
+      );
     });
 
     this.running = false;
@@ -257,7 +395,7 @@ export class WebServerManager {
 
   async getPort(): Promise<number> {
     if (!this.webPort) {
-      throw new Error('Web server not started - port not yet discovered');
+      throw new Error("Web server not started - port not yet discovered");
     }
     return this.webPort;
   }
@@ -272,10 +410,10 @@ export class WebServerManager {
 
   // Methods that should NOT be available in pure web server
   isMCPRunning(): never {
-    throw new Error('MCP functionality not available in pure web server');
+    throw new Error("MCP functionality not available in pure web server");
   }
 
   getMCPPort(): never {
-    throw new Error('MCP functionality not available in pure web server');
+    throw new Error("MCP functionality not available in pure web server");
   }
 }

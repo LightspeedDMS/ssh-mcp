@@ -1,8 +1,8 @@
 export enum ConnectionStatus {
-  CONNECTED = 'connected',
-  RECONNECTING = 'reconnecting',
-  DISCONNECTED = 'disconnected',
-  ERROR = 'error'
+  CONNECTED = "connected",
+  RECONNECTING = "reconnecting",
+  DISCONNECTED = "disconnected",
+  ERROR = "error",
 }
 
 export interface SSHConnectionConfig {
@@ -34,15 +34,13 @@ export interface CommandOptions {
   timeout?: number;
 }
 
-
 export interface WebSocketMessage {
   type: string;
   [key: string]: unknown;
 }
 
-
 export interface SessionSelectionMessage extends WebSocketMessage {
-  type: 'select_session';
+  type: "select_session";
   sessionName: string;
 }
 
@@ -51,7 +49,6 @@ export interface CommandHistoryEntry {
   timestamp: number;
   duration: number;
   exitCode: number;
-  status: 'success' | 'failure';
+  status: "success" | "failure";
   sessionName: string;
 }
-
