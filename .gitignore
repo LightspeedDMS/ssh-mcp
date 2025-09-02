@@ -59,6 +59,10 @@ pids/
 
 # MCP Server runtime files
 .ssh-mcp-server.port
+.ssh-mcp-server.pid
+ssh-mcp-unified.js
+ssh-mcp-unified.log
+ssh-mcp-persistent.js
 
 # Optional npm cache directory
 .npm
