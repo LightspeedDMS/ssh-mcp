@@ -15,10 +15,11 @@ A Model Context Protocol (MCP) server that provides SSH session management for C
 ### Prerequisites
 
 - Node.js 16+ and npm
+- Claude Code CLI installed and configured
 - SSH server access (for remote connections)
 - TypeScript (for development)
 
-### 1. Clone and Install
+### 1. Clone and Build
 
 ```bash
 git clone <repository-url> ls-ssh-mcp
@@ -27,33 +28,78 @@ npm install
 npm run build
 ```
 
-### 2. Install MCP Server
+### 2. Register with Claude Code
 
 ```bash
 # Use the installation script (recommended)
 ./install-mcp.sh
 
-# Or manually add to Claude Code
+# Or manually register
 claude mcp add ssh node /absolute/path/to/ls-ssh-mcp/dist/src/mcp-server.js
 ```
 
-The installation script handles port discovery, process cleanup, and configuration automatically.
+### 3. Verify Installation
+
+```bash
+# Check that the server was registered
+claude mcp list
+```
+
+**How it works:**
+- The `install-mcp.sh` script **registers** the server with Claude Code with an auto-discovered port
+- Claude Code **automatically starts** the server when you use SSH tools
+- No need to manually start/stop - the server runs on-demand
+- Web monitoring interface is available at `http://localhost:{port}/session/{session-name}`
+
+The installation script handles port discovery, cleanup of existing configurations, and proper registration.
 
 ## Usage
 
+### Basic Workflow
+
+1. **Connect to SSH server**: Use `ssh_connect` with your credentials
+2. **Execute commands**: Use `ssh_exec` to run commands on the remote server  
+3. **Monitor sessions**: Use `ssh_get_monitoring_url` to get browser monitoring URL
+4. **Manage sessions**: Use `ssh_list_sessions` and `ssh_disconnect` as needed
+
 ### Available MCP Tools
 
-The server provides 5 MCP tools:
+| Tool | Purpose | Required Parameters |
+|------|---------|-------------------|
+| `ssh_connect` | Establish SSH connection | `name`, `host`, `username`, `password`/`privateKey` |
+| `ssh_exec` | Execute commands on remote server | `sessionName`, `command` |
+| `ssh_list_sessions` | List all active SSH sessions | None |
+| `ssh_get_monitoring_url` | Get browser monitoring URL | `sessionName` |
+| `ssh_disconnect` | Disconnect an SSH session | `sessionName` |
 
-- `ssh_connect` - Establish SSH connection (requires name, host, username, password/privateKey)
-- `ssh_exec` - Execute commands on remote server (requires sessionName, command)
-- `ssh_list_sessions` - List all active SSH sessions
-- `ssh_get_monitoring_url` - Get browser monitoring URL for a session
-- `ssh_disconnect` - Disconnect an SSH session
+### Example Usage
+
+```bash
+# 1. Connect to a server
+ssh_connect name="myserver" host="example.com" username="user" password="pass"
+
+# 2. Execute commands
+ssh_exec sessionName="myserver" command="ls -la"
+ssh_exec sessionName="myserver" command="htop"
+
+# 3. Get monitoring URL for real-time terminal
+ssh_get_monitoring_url sessionName="myserver"
+# Returns: http://localhost:8082/session/myserver
+
+# 4. List all active sessions
+ssh_list_sessions
+
+# 5. Disconnect when done
+ssh_disconnect sessionName="myserver"
+```
 
 ### Web Monitoring Interface
 
-Use `ssh_get_monitoring_url` to get a browser URL for real-time terminal monitoring. The interface displays command history and live output via WebSocket connection.
+The browser interface provides:
+- **Live terminal output** via WebSocket connection
+- **Command history** with timestamps and exit codes
+- **Real-time streaming** of command execution
+- **Session-specific URLs** for each SSH connection
 
 ## Configuration
 
@@ -126,6 +172,53 @@ The server runs two components in the same process:
 - **Web Server**: Provides browser interface via HTTP and WebSocket on auto-discovered port
 
 Sessions are shared between both components for unified SSH management.
+
+## Troubleshooting
+
+### Common Issues
+
+**Server not starting after registration:**
+```bash
+# Check if Claude Code recognizes the server
+claude mcp list
+
+# Verify build exists
+ls -la dist/src/mcp-server.js
+
+# Test the server directly
+node dist/src/mcp-server.js
+```
+
+**Port conflicts:**
+```bash
+# Re-run installation to discover new port
+./install-mcp.sh
+
+# Verify new configuration
+claude mcp get ssh
+```
+
+**SSH connection failures:**
+- Verify SSH server is running and accessible
+- Check credentials (username/password or privateKey)
+- Ensure SSH server allows password authentication if using passwords
+
+**Web interface not accessible:**
+- Use `ssh_get_monitoring_url` to get the correct URL with current port
+- Check that the server is running: `ps aux | grep mcp-server`
+
+### Logs and Debugging
+
+```bash
+# Enable debug logging when using Claude Code
+export LOG_LEVEL=debug
+
+# Check MCP server configuration
+claude mcp get ssh
+
+# Test server manually with debug output
+LOG_LEVEL=debug node dist/src/mcp-server.js
+```
 
 ## License
 

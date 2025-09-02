@@ -85,9 +85,10 @@ if [ $? -eq 0 ]; then
     echo "  • Monitoring URL: http://localhost:$DISCOVERED_PORT/session/{session-name}"
     echo ""
     echo -e "${YELLOW}Next Steps:${NC}"
-    echo "1. Restart Claude Code: claude restart"
+    echo "1. Start using SSH tools in Claude Code (server starts automatically)"
     echo "2. Test SSH connection with your preferred host and credentials"
     echo "3. Use ssh_get_monitoring_url tool to get the specific monitoring URL"
+    echo "4. Verify installation with: claude mcp list"
     echo ""
     echo -e "${GREEN}Installation complete!${NC}"
 else
