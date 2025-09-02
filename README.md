@@ -66,11 +66,16 @@ The installation script handles port discovery, cleanup of existing configuratio
 
 | Tool | Purpose | Required Parameters |
 |------|---------|-------------------|
-| `ssh_connect` | Establish SSH connection | `name`, `host`, `username`, `password`/`privateKey`/`keyFilePath` |
+| `ssh_connect` | Establish SSH connection | `name`, `host`, `username`, auth method* |
 | `ssh_exec` | Execute commands on remote server | `sessionName`, `command` |
 | `ssh_list_sessions` | List all active SSH sessions | None |
 | `ssh_get_monitoring_url` | Get browser monitoring URL | `sessionName` |
 | `ssh_disconnect` | Disconnect an SSH session | `sessionName` |
+
+\* **Authentication methods**: Choose one:
+- `password` - SSH user account password
+- `privateKey` - Direct private key content (+ optional `passphrase` if key is encrypted)  
+- `keyFilePath` - Path to private key file (+ optional `passphrase` if key is encrypted)
 
 ### Example Usage
 
@@ -86,8 +91,11 @@ ssh_connect name="myserver" host="example.com" username="user" keyFilePath="~/.s
 # Option C: SSH key file with passphrase (encrypted key)
 ssh_connect name="myserver" host="example.com" username="user" keyFilePath="~/.ssh/id_ed25519" passphrase="mypassphrase"
 
-# Option D: Direct private key content (legacy)
+# Option D: Direct private key content (unencrypted)
 ssh_connect name="myserver" host="example.com" username="user" privateKey="-----BEGIN OPENSSH PRIVATE KEY-----..."
+
+# Option E: Direct private key content (encrypted with passphrase)
+ssh_connect name="myserver" host="example.com" username="user" privateKey="-----BEGIN OPENSSH PRIVATE KEY-----..." passphrase="keypassword"
 
 # 2. Execute commands
 ssh_exec sessionName="myserver" command="ls -la"
