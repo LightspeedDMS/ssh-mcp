@@ -10,6 +10,9 @@ import {
   CommandResult,
   CommandOptions,
   CommandHistoryEntry,
+  ErrorResponse,
+  QueuedCommand,
+  QUEUE_CONSTANTS,
 } from "./types.js";
 
 export interface ISSHConnectionManager {
@@ -45,6 +48,7 @@ export interface TerminalOutputEntry {
   preserveFormatting: boolean;
   vt100Compatible: boolean;
   encoding: string;
+  source?: import("./types.js").CommandSource;
 }
 
 interface TerminalOutputListener {
@@ -78,6 +82,9 @@ interface SessionData {
     startTime: number;
     timeoutHandle?: ReturnType<typeof setTimeout>;
   };
+  // Command queue for handling concurrent commands
+  commandQueue: QueuedCommand[];
+  isCommandExecuting: boolean;
 }
 
 // Terminal output streaming interfaces
@@ -132,9 +139,19 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     sessionName: string,
     data: string,
     stream: "stdout" | "stderr" = "stdout",
+    source?: import("./types.js").CommandSource,
   ): void {
     const sessionData = this.connections.get(sessionName);
     if (!sessionData) return;
+
+    console.log('📡 broadcastToLiveListeners called:', {
+      sessionName,
+      dataLength: data.length,
+      data: JSON.stringify(data),
+      source,
+      stream,
+      callStack: new Error().stack?.split('\n').slice(1, 3).join(' -> ')
+    });
 
     const outputEntry: TerminalOutputEntry = {
       timestamp: Date.now(),
@@ -144,6 +161,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       preserveFormatting: true,
       vt100Compatible: true,
       encoding: "utf8",
+      source,
     };
 
     // Only notify live listeners - don't store in history
@@ -164,6 +182,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     sessionName: string,
     data: string,
     stream: "stdout" | "stderr" = "stdout",
+    source?: import("./types.js").CommandSource,
   ): void {
     const sessionData = this.connections.get(sessionName);
     if (!sessionData) return;
@@ -176,6 +195,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       preserveFormatting: true,
       vt100Compatible: true,
       encoding: "utf8",
+      source,
     };
 
     // Only store in history buffer (keep last 1000 entries)
@@ -185,14 +205,6 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     }
   }
 
-  private broadcastTerminalOutput(
-    sessionName: string,
-    data: string,
-    stream: "stdout" | "stderr" = "stdout",
-  ): void {
-    // Legacy method - now just calls the live broadcast
-    this.broadcastToLiveListeners(sessionName, data, stream);
-  }
 
   async createConnection(config: SSHConnectionConfig): Promise<SSHConnection> {
     // Validate session name
@@ -251,6 +263,8 @@ export class SSHConnectionManager implements ISSHConnectionManager {
           outputListeners: [],
           commandHistory: [],
           commandHistoryListeners: [],
+          commandQueue: [],
+          isCommandExecuting: false,
         };
 
         this.connections.set(config.name, sessionData);
@@ -378,31 +392,17 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       return;
     }
 
-    // Note: SSH2 shell channels combine stdout and stderr streams
-    // This is different from exec channels which separate them
-    sessionData.shellChannel.on("data", (data: Buffer) => {
-      const output = data.toString();
-
-      // Skip real-time streaming during command execution to avoid duplication
-      if (!sessionData.currentCommand) {
-        this.streamTerminalOutput(sessionData, output, "stdout");
-      }
-
-      if (sessionData.currentCommand) {
-        sessionData.currentCommand.stdout += output;
-      }
-    });
-
-    // Shell channels don't have separate stderr stream in SSH2
-    // All error output comes through the main data stream
+    // ARCHITECTURAL FIX: Remove permanent data handler entirely
+    // The permanent handler was competing with temporary command handlers,
+    // causing duplicate processing of the same shell output data.
+    // Now only temporary handlers (added per command) will process output.
+    
+    // Keep minimal stderr handler only for error accumulation during commands
     sessionData.shellChannel.stderr?.on("data", (data: Buffer) => {
       const output = data.toString();
-
-      // Stream real-time terminal output
-      this.streamTerminalOutput(sessionData, output, "stderr");
-
+      
+      // Only accumulate stderr during command execution
       if (sessionData.currentCommand) {
-        // This event rarely fires for shell channels - combined output is the norm
         sessionData.currentCommand.stderr += output;
       }
     });
@@ -413,6 +413,11 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     command: string,
     options: CommandOptions = {},
   ): Promise<CommandResult> {
+    // Validate command source FIRST for security - must be the very first action
+    if (options.source !== undefined) {
+      this.validateCommandSource(options.source);
+    }
+    
     const sessionData = this.getValidatedSession(connectionName);
 
     // Require shell session to be ready for session state persistence
@@ -423,16 +428,95 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     }
 
     return new Promise((resolve, reject) => {
-      const commandEntry = {
+      // SECURITY FIX: Check queue size limit to prevent DoS attacks
+      if (sessionData.commandQueue.length >= QUEUE_CONSTANTS.MAX_QUEUE_SIZE) {
+        reject(new Error(
+          `Command queue is full. Maximum ${QUEUE_CONSTANTS.MAX_QUEUE_SIZE} commands allowed per session.`
+        ));
+        return;
+      }
+
+      const queuedCommand: QueuedCommand = {
         command,
+        options,
         resolve,
         reject,
-        options,
+        timestamp: Date.now(),
       };
 
-      // Execute command directly - simplified approach
-      this.executeCommandInShell(sessionData, commandEntry);
+      // Add command to queue
+      sessionData.commandQueue.push(queuedCommand);
+
+      // Process queue (will execute immediately if no command is running)
+      this.processCommandQueue(sessionData);
     });
+  }
+
+  private processCommandQueue(sessionData: SessionData): void {
+    // RACE CONDITION FIX: Make queue processing atomic
+    // Check execution state and queue length atomically to prevent race conditions
+    if (sessionData.isCommandExecuting || sessionData.commandQueue.length === 0) {
+      return;
+    }
+
+    // Clean stale commands before processing (optional robustness feature)
+    this.cleanStaleCommands(sessionData);
+
+    // After cleaning, re-check if queue is empty
+    if (sessionData.commandQueue.length === 0) {
+      return;
+    }
+
+    // Atomically get the next command and mark execution as started
+    const queuedCommand = sessionData.commandQueue.shift();
+    if (!queuedCommand) {
+      return;
+    }
+
+    // Mark that we're now executing a command IMMEDIATELY after getting command
+    // This prevents race conditions where multiple threads see isCommandExecuting as false
+    sessionData.isCommandExecuting = true;
+
+    // Convert queued command to the format expected by executeCommandInShell
+    const commandEntry = {
+      command: queuedCommand.command,
+      resolve: queuedCommand.resolve,
+      reject: queuedCommand.reject,
+      options: queuedCommand.options,
+    };
+
+    // Execute the command
+    this.executeCommandInShell(sessionData, commandEntry);
+  }
+
+  /**
+   * Clean stale commands from queue to prevent memory leaks and improve responsiveness
+   * Commands older than MAX_COMMAND_AGE_MS are rejected with appropriate error
+   */
+  private cleanStaleCommands(sessionData: SessionData): void {
+    const currentTime = Date.now();
+    const initialQueueLength = sessionData.commandQueue.length;
+    
+    // Filter out stale commands and reject them
+    sessionData.commandQueue = sessionData.commandQueue.filter((queuedCommand) => {
+      const commandAge = currentTime - queuedCommand.timestamp;
+      
+      if (commandAge > QUEUE_CONSTANTS.MAX_COMMAND_AGE_MS) {
+        // Reject stale command with appropriate error
+        queuedCommand.reject(new Error(
+          `Command expired after ${Math.round(commandAge / 1000)}s in queue. ` +
+          `Maximum age is ${Math.round(QUEUE_CONSTANTS.MAX_COMMAND_AGE_MS / 1000)}s.`
+        ));
+        return false; // Remove from queue
+      }
+      
+      return true; // Keep in queue
+    });
+    
+    const cleanedCount = initialQueueLength - sessionData.commandQueue.length;
+    if (cleanedCount > 0) {
+      console.log(`Cleaned ${cleanedCount} stale commands from queue for session ${sessionData.connection.name}`);
+    }
   }
 
   private executeCommandInShell(
@@ -446,6 +530,9 @@ export class SSHConnectionManager implements ISSHConnectionManager {
   ): void {
     if (!sessionData.shellChannel) {
       commandEntry.reject(new Error("Shell channel not available"));
+      // Clear execution flag and process next command
+      sessionData.isCommandExecuting = false;
+      this.processCommandQueue(sessionData);
       return;
     }
 
@@ -457,6 +544,9 @@ export class SSHConnectionManager implements ISSHConnectionManager {
           `Command '${trimmedCommand}' would terminate the shell session`,
         ),
       );
+      // Clear execution flag and process next command
+      sessionData.isCommandExecuting = false;
+      this.processCommandQueue(sessionData);
       return;
     }
 
@@ -505,6 +595,9 @@ export class SSHConnectionManager implements ISSHConnectionManager {
           ),
         );
         sessionData.currentCommand = undefined;
+        // Clear execution flag and process next command
+        sessionData.isCommandExecuting = false;
+        this.processCommandQueue(sessionData);
       }
     }, timeoutMs);
 
@@ -528,6 +621,9 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     if (!sessionData.currentCommand || !sessionData.shellChannel) {
       return;
     }
+
+    console.log('🔍 completeSimpleCommand called with rawOutput:', JSON.stringify(rawOutput));
+    console.log('🔍 completeSimpleCommand call stack:', new Error().stack?.split('\n').slice(1, 4).join('\n'));
 
     sessionData.shellChannel.removeListener("data", onData);
 
@@ -597,12 +693,12 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       exitCode,
     };
 
-    // For live terminal view - broadcast the RAW output with proper formatting
-    // This preserves line breaks and formatting that xterm.js needs
-    this.broadcastToLiveListeners(sessionData.connection.name, rawOutput);
-
-    // Store the raw output in history for new connections
-    this.storeInHistory(sessionData.connection.name, rawOutput);
+    // For live terminal view - broadcast appropriate output based on command source
+    const commandSource = sessionData.currentCommand.options.source || "claude";
+    
+    // Always broadcast raw output INCLUDING prompts - the browser needs prompts to unlock terminal
+    this.broadcastToLiveListeners(sessionData.connection.name, rawOutput, "stdout", commandSource);
+    this.storeInHistory(sessionData.connection.name, commandOutput, "stdout", commandSource);
 
     // Record command in history
     const executionEndTime = Date.now();
@@ -614,6 +710,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       exitCode,
       status: exitCode === 0 ? "success" : "failure",
       sessionName: sessionData.connection.name,
+      source: sessionData.currentCommand.options.source || "claude",
     };
 
     // Add to history (maintaining max 100 entries)
@@ -634,8 +731,14 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     resolve(result);
     sessionData.currentCommand = undefined;
 
+    // Mark command execution as complete
+    sessionData.isCommandExecuting = false;
+
     // Update session tracking
     sessionData.connection.lastActivity = new Date();
+
+    // Process next command in queue if any
+    this.processCommandQueue(sessionData);
   }
 
   private getValidatedSession(sessionName: string): SessionData {
@@ -644,6 +747,16 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       throw new Error(`Session '${sessionName}' not found`);
     }
     return sessionData;
+  }
+
+  private validateCommandSource(source: unknown): void {
+    if (typeof source !== 'string') {
+      throw new Error('Command source must be a string');
+    }
+    
+    if (source !== 'user' && source !== 'claude') {
+      throw new Error('Invalid command source: must be "user" or "claude"');
+    }
   }
 
   cleanup(): void {
@@ -683,6 +796,55 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     }
   }
 
+  /**
+   * Comprehensive CommandId validation with format and length checks
+   * Prevents injection attacks and ensures proper command tracking
+   */
+  public validateCommandId(commandId: string): { valid: boolean; reason?: string } {
+    // Check if empty
+    if (!commandId || typeof commandId !== 'string' || commandId.trim() === '') {
+      return { valid: false, reason: 'empty' };
+    }
+
+    // Check length limits (reasonable maximum for command tracking)
+    if (commandId.length > 128) {
+      return { valid: false, reason: 'too_long' };
+    }
+
+    // Check for invalid characters that could cause security issues
+    const invalidCharsPattern = /[<>;"'&|`$(){}[\]\\]/;
+    if (invalidCharsPattern.test(commandId)) {
+      return { valid: false, reason: 'invalid_chars' };
+    }
+
+    // Ensure it doesn't start or end with whitespace
+    if (commandId !== commandId.trim()) {
+      return { valid: false, reason: 'whitespace_padding' };
+    }
+
+    // Valid CommandId format: alphanumeric, dashes, underscores, dots
+    const validPattern = /^[a-zA-Z0-9_.-]+$/;
+    if (!validPattern.test(commandId)) {
+      return { valid: false, reason: 'invalid_format' };
+    }
+
+    return { valid: true };
+  }
+
+  /**
+   * Creates a standardized error response with consistent structure
+   * Used throughout the application for uniform error handling
+   */
+  public createStandardizedErrorResponse(error: Error, commandId?: string): ErrorResponse {
+    return {
+      error: error.name || 'Error',
+      message: error.message,
+      timestamp: Date.now(),
+      code: error.name?.toUpperCase().replace(/ERROR$/, '') || 'UNKNOWN',
+      ...(commandId && { commandId })
+    };
+  }
+
   listSessions(): SSHConnection[] {
     const sessions: SSHConnection[] = [];
     for (const sessionData of this.connections.values()) {
@@ -705,10 +867,15 @@ export class SSHConnectionManager implements ISSHConnectionManager {
   async disconnectSession(name: string): Promise<void> {
     const sessionData = this.getValidatedSession(name);
 
+    // QUEUE CLEANUP FIX: Reject all pending queued commands to prevent promise leaks
+    this.rejectAllQueuedCommands(sessionData, `Session '${name}' disconnected`);
+
     // Broadcast disconnection event
-    this.broadcastTerminalOutput(
+    this.broadcastToLiveListeners(
       name,
       `Connection to ${sessionData.connection.host} closed`,
+      "stdout",
+      "system"
     );
 
     this.cleanupSession(sessionData);
@@ -717,69 +884,38 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     this.connections.delete(name);
   }
 
-  // Terminal output streaming methods
-  private streamTerminalOutput(
-    sessionData: SessionData,
-    output: string,
-    stream: "stdout" | "stderr",
-  ): void {
-    const timestamp = Date.now();
-
-    // Broadcast to terminal listeners in real-time
-    this.broadcastTerminalOutput(sessionData.connection.name, output, stream);
-
-    // Create terminal output entry with formatting preservation and VT100 compatibility
-    const outputEntry: TerminalOutputEntry = {
-      timestamp,
-      output,
-      stream,
-      rawOutput: output,
-      preserveFormatting: this.containsFormatting(output),
-      vt100Compatible: this.containsVT100Sequences(output),
-      encoding: "utf-8",
-    };
-
-    // Add to output buffer (keep last 1000 entries for historical display)
-    sessionData.outputBuffer.push(outputEntry);
-    if (sessionData.outputBuffer.length > 1000) {
-      sessionData.outputBuffer.shift();
+  /**
+   * Reject all queued commands when session is disconnected to prevent promise leaks
+   * This ensures clean shutdown and proper error handling for pending operations
+   */
+  private rejectAllQueuedCommands(sessionData: SessionData, reason: string): void {
+    const queuedCommandsCount = sessionData.commandQueue.length;
+    
+    if (queuedCommandsCount > 0) {
+      console.log(`Rejecting ${queuedCommandsCount} queued commands due to: ${reason}`);
+      
+      // Reject all queued commands with appropriate error
+      sessionData.commandQueue.forEach((queuedCommand) => {
+        queuedCommand.reject(new Error(
+          `Command cancelled - ${reason}`
+        ));
+      });
+      
+      // Clear the queue
+      sessionData.commandQueue.length = 0;
     }
-
-    // Notify all listeners
-    sessionData.outputListeners.forEach((listener) => {
-      try {
-        listener.callback(outputEntry);
-      } catch (error) {
-        // Silent error handling - don't crash on listener errors
-      }
-    });
+    
+    // Also reject the currently executing command if any
+    if (sessionData.currentCommand) {
+      sessionData.currentCommand.reject(new Error(
+        `Command interrupted - ${reason}`
+      ));
+      sessionData.currentCommand = undefined;
+      sessionData.isCommandExecuting = false;
+    }
   }
 
-  private containsFormatting(output: string): boolean {
-    // Check for ANSI escape sequences and formatting codes
-    /* eslint-disable no-control-regex -- ANSI escape sequences require control characters for terminal formatting */
-    const ansiPatterns = [
-      /\x1b\[[0-9;]*[a-zA-Z]/, // Standard ANSI sequences like \x1b[31m
-      /\x1b\[\?[0-9]+[hl]/, // Mode set/reset sequences like \x1b[?2004h
-      /\x1b\[[0-9]+;[0-9]+[a-zA-Z]/, // Position sequences like \x1b[1;1H
-      /\x1b\[[A-Z]/, // Simple escape sequences like \x1b[H
-    ];
-    /* eslint-enable no-control-regex */
-    return ansiPatterns.some((pattern) => pattern.test(output));
-  }
 
-  private containsVT100Sequences(output: string): boolean {
-    // Check for VT100 specific sequences like cursor movement, screen manipulation
-    /* eslint-disable no-control-regex -- VT100 sequences require control characters for terminal control */
-    const vt100Patterns = [
-      /\x1b\[2J/, // Clear screen
-      /\x1b\[H/, // Home cursor
-      /\x1b\[[0-9]+;[0-9]+H/, // Cursor position
-      /\x1b\[[0-9]*[ABCD]/, // Cursor movement
-    ];
-    /* eslint-enable no-control-regex */
-    return vt100Patterns.some((pattern) => pattern.test(output));
-  }
 
   // Terminal interaction methods for Story 5
   sendTerminalInput(sessionName: string, input: string): void {
