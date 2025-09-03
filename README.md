@@ -4,11 +4,28 @@ A Model Context Protocol (MCP) server that provides SSH session management for C
 
 ## Features
 
+### Core Functionality
 - **Persistent SSH Sessions** - Named SSH connections that maintain state across commands
-- **Real-time Terminal Monitoring** - Browser interface with live terminal output via WebSocket
+- **Interactive Terminal Interface** - Full browser-based terminal with keyboard input and command execution
 - **Multi-Session Support** - Manage multiple independent SSH sessions simultaneously
+- **Real-time Output Streaming** - Live terminal output via WebSocket with no command echo duplication
 - **Command History** - Track executed commands with timestamps and exit codes
 - **Session Isolation** - Each session maintains separate terminal history and state
+
+### Interactive Terminal Capabilities
+- **Direct Command Input** - Type commands directly in the browser terminal interface
+- **Local Echo** - Immediate character display with terminal cursor movement
+- **Command Line Editing** - Full keyboard navigation (arrows, Home, End, backspace)
+- **Terminal State Management** - Smart locking/unlocking based on command execution status
+- **Source Attribution** - Commands from browser users vs Claude Code are properly tracked
+- **Concurrent Execution** - User and Claude Code commands execute through shared SSH session with queuing
+
+### Advanced Features
+- **Multiple Authentication Methods** - SSH keys (encrypted/unencrypted), username/password, direct key content
+- **Command Queuing** - FIFO execution prevents output interleaving between user and Claude Code commands
+- **WebSocket Communication** - Bidirectional messaging for command execution and output streaming
+- **Session State Synchronization** - Multiple browser clients stay in sync with terminal state
+- **Zero Echo Duplication** - Clean single output for all commands regardless of source
 
 ## Installation & Setup
 
@@ -112,13 +129,29 @@ ssh_list_sessions
 ssh_disconnect sessionName="myserver"
 ```
 
-### Web Monitoring Interface
+### Interactive Web Terminal
 
-The browser interface provides:
-- **Live terminal output** via WebSocket connection
-- **Command history** with timestamps and exit codes
-- **Real-time streaming** of command execution
-- **Session-specific URLs** for each SSH connection
+The browser interface provides a fully interactive terminal experience:
+
+#### Terminal Input & Navigation
+- **Direct Command Input** - Type commands directly in the terminal, just like a native SSH client
+- **Local Echo** - Characters appear immediately as you type with cursor movement
+- **Command Line Editing** - Use arrow keys, Home, End, and backspace for full editing
+- **Terminal Locking** - Interface locks during command execution, unlocks when complete
+
+#### Real-time Features
+- **Live Output Streaming** - See command results in real-time via WebSocket
+- **Concurrent Commands** - User-typed commands and Claude Code commands execute seamlessly
+- **Session Synchronization** - Multiple browser windows stay synchronized
+- **Command History** - Complete history with timestamps and exit codes
+
+#### Advanced Capabilities
+- **Source Attribution** - Terminal tracks whether commands came from user input or Claude Code
+- **Queue Management** - Commands execute in order without output mixing
+- **State Persistence** - Session state maintained across browser reconnects
+- **No Echo Duplication** - Clean output without command repetition
+
+**Usage**: Navigate to the monitoring URL and interact with the terminal exactly like a local SSH session. Type commands, press Enter, and see results instantly. Claude Code can also execute commands in the same session without interference.
 
 ## SSH Authentication Methods
 
@@ -206,11 +239,20 @@ For running tests, you need:
 ```
 ├── src/
 │   ├── mcp-server.ts              # Main server orchestrator
-│   ├── mcp-ssh-server.ts          # MCP protocol handler
-│   ├── web-server-manager.ts      # Web interface server
-│   ├── ssh-connection-manager.ts  # SSH session management
-│   └── types.ts                   # TypeScript definitions
-├── static/                        # xterm.js terminal interface
+│   ├── mcp-ssh-server.ts          # MCP protocol handler  
+│   ├── web-server-manager.ts      # Web interface server + WebSocket handlers
+│   ├── ssh-connection-manager.ts  # SSH session management + command queuing
+│   └── types.ts                   # TypeScript definitions + command source types
+├── static/                        # Interactive xterm.js terminal interface
+│   ├── terminal-input-handler.js  # Browser input handling and state management
+│   └── [xterm.js assets]          # Terminal rendering components
+├── plans/
+│   ├── interactive-terminal-epic.md # Complete implementation documentation
+│   └── [other planning docs]      # Additional project planning
+├── tests/                         # Comprehensive test suite
+│   ├── story*.test.ts             # User story validation tests
+│   ├── e2e-*.test.ts             # End-to-end functionality tests
+│   └── manual-tests/             # Manual testing scripts and plans
 ├── install-mcp.sh                 # Installation script
 └── dist/                          # Compiled output
 ```
@@ -224,24 +266,86 @@ For running tests, you need:
 
 ## Architecture
 
-The server runs two components in the same process:
+### Overall Design
 
-- **MCP Server**: Communicates with Claude Code via stdio protocol (no network port)
-- **Web Server**: Provides browser interface via HTTP and WebSocket on auto-discovered port
+The SSH MCP Server implements a sophisticated architecture that seamlessly integrates Claude Code's MCP tools with interactive browser terminals:
+
+```
+┌─────────────────┐    stdio    ┌─────────────────┐    WebSocket    ┌─────────────────┐
+│   Claude Code   │◄──────────►│   MCP Server    │◄──────────────►│ Browser Terminal│
+└─────────────────┘   commands  └─────────────────┘   bidirectional └─────────────────┘
+                                          │
+                                          ▼
+                                ┌─────────────────┐
+                                │ SSH Connection  │
+                                │    Manager      │
+                                │  (with Queue)   │
+                                └─────────────────┘
+                                          │
+                                          ▼ 
+                                ┌─────────────────┐
+                                │  Remote SSH     │
+                                │     Server      │
+                                └─────────────────┘
+```
+
+### Core Components
+
+- **MCP Server**: Handles Claude Code communication via stdio protocol (no network port)
+- **Web Server**: Provides interactive terminal interface via HTTP and WebSocket  
+- **SSH Connection Manager**: Centralized session management with command queuing
+- **Interactive Terminal**: Browser-based xterm.js interface with input handling
+
+### Key Architectural Features
+
+#### 1. **Unified Command Execution**
+- Both Claude Code tools and browser user input execute through the same SSH sessions
+- Commands are queued in FIFO order to prevent output interleaving
+- Source attribution tracks whether commands came from "user" or "claude"
+
+#### 2. **Real-time Communication**
+- **MCP Protocol**: stdio transport between Claude Code and server
+- **WebSocket**: Bidirectional communication between browser and server
+- **SSH Connection**: Persistent shell channels with streaming output
+
+#### 3. **State Management**
+- **Session Persistence**: SSH sessions maintain state across all command sources
+- **Terminal Synchronization**: Multiple browser clients stay synchronized
+- **Queue Management**: Commands execute sequentially with proper cleanup
 
 ### Port Management
 
-- **MCP communication**: Uses stdio transport only (stdin/stdout with Claude Code)
-- **Web interface**: Single auto-discovered port serves both HTTP routes and WebSocket connections
-- **Port discovery**: Installation script discovers available port and stores as `WEB_PORT` environment variable for the MCP server process
-- **Coordination**: Shared SSH session manager enables MCP tools to return monitoring URLs pointing to the web interface
+- **MCP Communication**: Uses stdio transport only (stdin/stdout with Claude Code)
+- **Web Interface**: Single auto-discovered port serves both HTTP routes and WebSocket connections
+- **Port Discovery**: Installation script discovers available port and stores as `WEB_PORT` environment variable
+- **URL Generation**: MCP tools return monitoring URLs pointing to the web interface
+
+### Interactive Terminal Architecture
+
+#### Browser-Side Components
+- **xterm.js Terminal**: Renders terminal interface with full VT100 compatibility
+- **Input Handler**: Manages keyboard input, local echo, and command submission
+- **WebSocket Client**: Handles bidirectional communication with server
+- **State Manager**: Tracks terminal lock/unlock state and command execution
+
+#### Server-Side Processing
+- **WebSocket Handler**: Processes terminal input messages from browser
+- **Command Router**: Routes commands to SSH connection manager with source attribution
+- **Output Broadcaster**: Streams command results back to all connected clients
+- **Queue Coordinator**: Ensures proper execution order for mixed command sources
 
 ### Deployment Modes
 
-- **Production**: Claude Code automatically starts `mcp-server.js` on-demand when SSH tools are used
-- **Development**: Manual testing via `orchestrator.js` with independent port discovery
+- **Production**: Claude Code automatically starts server on-demand when SSH tools are used
+- **Development**: Manual testing with independent port discovery
+- **Interactive Mode**: Browser clients can connect and interact with existing SSH sessions
 
-Sessions are shared between both components for unified SSH management.
+### Data Flow
+
+1. **Claude Code Command**: `ssh_exec` → MCP Server → SSH Manager → Queue → SSH Session
+2. **Browser Command**: Terminal Input → WebSocket → Web Server → SSH Manager → Queue → SSH Session
+3. **Output Streaming**: SSH Session → SSH Manager → WebSocket → Browser Terminal
+4. **State Updates**: Command completion → Terminal unlock (for user commands only)
 
 ## Troubleshooting
 
@@ -289,6 +393,7 @@ claude mcp get ssh
 # Test server manually with debug output
 LOG_LEVEL=debug node dist/src/mcp-server.js
 ```
+
 
 ## License
 

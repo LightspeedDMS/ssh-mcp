@@ -6,8 +6,8 @@ describe("E2E Session Fixes Validation", () => {
   const testConfig: SSHConnectionConfig = {
     name: "e2e-session-fixes",
     host: "localhost",
-    username: "test_user",
-    password: "password123",
+    username: "jsbattig",
+    keyFilePath: "/home/jsbattig/.ssh/id_ed25519",
   };
 
   beforeEach(() => {

@@ -2,6 +2,7 @@ import {
   SSHConnectionManager,
   TerminalOutputEntry,
 } from "./ssh-connection-manager.js";
+import { ErrorResponse } from "./types.js";
 import { PortManager } from "./port-discovery.js";
 import * as http from "http";
 import express from "express";
@@ -9,6 +10,28 @@ import { WebSocketServer } from "ws";
 
 export interface WebServerManagerConfig {
   port?: number;
+}
+
+// Terminal state synchronization interfaces
+interface TerminalLockState {
+  isLocked: boolean;
+  commandId: string | null;
+  source: 'user' | 'claude' | null;
+  timestamp: number;
+  sessionName: string;
+}
+
+interface SessionState {
+  terminalLockState: TerminalLockState;
+  connectedClients: Set<import("ws").WebSocket>;
+  lastActivity: number;
+  commandHistory: Array<{
+    commandId: string;
+    command: string;
+    source: 'user' | 'claude';
+    timestamp: number;
+    completed: boolean;
+  }>;
 }
 
 /**
@@ -24,6 +47,9 @@ export class WebServerManager {
   private config: WebServerManagerConfig;
   private webPort?: number;
   private running = false;
+  
+  // Terminal state synchronization
+  private sessionStates: Map<string, SessionState> = new Map();
 
   constructor(
     sshManager: SSHConnectionManager,
@@ -41,6 +67,9 @@ export class WebServerManager {
     this.app = express();
 
     this.setupExpressRoutes();
+    
+    // Set up monitoring for Claude Code commands to provide visual indicators
+    this.setupClaudeCommandMonitoring();
   }
 
   private validateConfig(config: WebServerManagerConfig): void {
@@ -151,6 +180,26 @@ export class WebServerManager {
     <title>SSH MCP Terminal Viewer</title>
     <link rel="stylesheet" href="/xterm.css" />
     <link rel="stylesheet" href="/styles.css">
+    <style>
+        .terminal-locked {
+            opacity: 0.7;
+            pointer-events: none;
+        }
+        .terminal-locked::after {
+            content: '🔒 Terminal locked - command executing';
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 255, 0, 0.8);
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            color: #333;
+        }
+        #terminal-container {
+            position: relative;
+        }
+    </style>
 </head>
 <body>
     <div id="session-header">
@@ -164,6 +213,7 @@ export class WebServerManager {
     
     <script src="/xterm.js"></script>
     <script src="/xterm-addon-fit.js"></script>
+    <script src="/terminal-input-handler.js"></script>
     <script>
         const sessionName = '${sessionName}';
         const wsUrl = \`ws://localhost:${this.webPort}/ws/session/\${sessionName}\`;
@@ -190,15 +240,31 @@ export class WebServerManager {
         // WebSocket connection
         const ws = new WebSocket(wsUrl);
         
+        // Initialize terminal input handler with the real production code
+        let terminalHandler;
+        
         ws.onopen = function() {
             console.log('WebSocket connected to:', wsUrl);
             document.getElementById('connection-status').innerHTML = '🟢 Connected';
+            
+            // Initialize terminal handler after WebSocket connection is established
+            terminalHandler = new TerminalInputHandler(term, ws, sessionName);
         };
         
         ws.onmessage = function(event) {
-            const data = JSON.parse(event.data);
-            if (data.type === 'terminal_output') {
-                term.write(data.data);
+            try {
+                const data = JSON.parse(event.data);
+                if (terminalHandler) {
+                    terminalHandler.handleTerminalOutput(data);
+                } else {
+                    // Terminal handler must be ready - graceful failure over forced success
+                    console.error('Terminal handler not initialized when message received:', data);
+                    document.getElementById('connection-status').innerHTML = '⚠️ Handler Not Ready';
+                    throw new Error('Terminal handler not ready - cannot process message');
+                }
+            } catch (error) {
+                console.error('Error processing WebSocket message:', error);
+                document.getElementById('connection-status').innerHTML = '⚠️ Message Error';
             }
         };
         
@@ -208,19 +274,8 @@ export class WebServerManager {
         
         ws.onerror = function(error) {
             console.error('WebSocket error:', error);
-            document.getElementById('connection-status').innerHTML = '⚠️ Error';
+            document.getElementById('connection-status').innerHTML = '⚠️ Connection Error';
         };
-        
-        // Handle terminal input
-        term.onData(function(data) {
-            if (ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
-                    type: 'terminal_input',
-                    sessionName: sessionName,
-                    data: data
-                }));
-            }
-        });
         
         // Auto-resize terminal
         window.addEventListener('resize', () => {
@@ -230,6 +285,36 @@ export class WebServerManager {
 </body>
 </html>
       `);
+    });
+
+    // Admin endpoint to reset terminal lock state
+    this.app.post("/admin/unlock-terminal/:sessionName", express.json(), (req, res) => {
+      const sessionName = req.params.sessionName;
+
+      // Validate session exists
+      if (!this.sshManager.hasSession(sessionName)) {
+        res.status(404).json({ error: "Session not found" });
+        return;
+      }
+
+      // Reset terminal lock state
+      const sessionState = this.getOrCreateSessionState(sessionName);
+      sessionState.terminalLockState = {
+        isLocked: false,
+        commandId: null,
+        source: null,
+        timestamp: Date.now(),
+        sessionName
+      };
+
+      // Broadcast unlock state to all connected clients
+      this.broadcastTerminalLockState(sessionName, sessionState.terminalLockState);
+
+      res.json({ 
+        success: true, 
+        message: `Terminal lock state reset for session: ${sessionName}`,
+        timestamp: new Date().toISOString()
+      });
     });
   }
 
@@ -289,6 +374,9 @@ export class WebServerManager {
     ws: import("ws").WebSocket,
     sessionName: string,
   ): void {
+    // Add client to session for state synchronization (AC5.3, AC5.4)
+    this.addClientToSession(sessionName, ws);
+
     // Auto-subscribe to session terminal output
     if (this.sshManager.hasSession(sessionName)) {
       const outputCallback = (entry: TerminalOutputEntry): void => {
@@ -299,6 +387,7 @@ export class WebServerManager {
               sessionName,
               timestamp: new Date(entry.timestamp).toISOString(),
               data: entry.output,
+              source: entry.source, // CRITICAL: Include source to prevent undefined source
             }),
           );
         }
@@ -317,6 +406,7 @@ export class WebServerManager {
                 sessionName,
                 timestamp: new Date(entry.timestamp).toISOString(),
                 data: entry.output,
+                source: entry.source, // CRITICAL: Include source for history replay
               }),
             );
           }
@@ -327,6 +417,8 @@ export class WebServerManager {
             sessionName,
             outputCallback,
           );
+          // Remove client from session state tracking
+          this.removeClientFromSession(sessionName, ws);
         });
 
         ws.on("error", () => {
@@ -334,6 +426,34 @@ export class WebServerManager {
             sessionName,
             outputCallback,
           );
+          // Remove client from session state tracking
+          this.removeClientFromSession(sessionName, ws);
+        });
+
+        // Handle incoming WebSocket messages (terminal input and state requests)
+        ws.on("message", (message: Buffer) => {
+          let data: unknown;
+          try {
+            data = JSON.parse(message.toString());
+            
+            if (typeof data === 'object' && data !== null && 
+                'type' in data && 'sessionName' in data) {
+              
+              const messageData = data as Record<string, unknown>;
+              
+              if (messageData.type === "terminal_input" && messageData.sessionName === sessionName) {
+                void this.handleTerminalInputMessage(ws, data, sessionName);
+              } else if (messageData.type === "request_state_recovery" && messageData.sessionName === sessionName) {
+                this.handleStateRecoveryRequest(ws, sessionName);
+              } else if (messageData.type === "malformed_test") {
+                // Handle malformed message test gracefully (AC5.5)
+                this.handleMalformedMessage(ws, sessionName);
+              }
+            }
+          } catch (error) {
+            console.error("Error processing WebSocket message:", error);
+            this.handleMalformedMessage(ws, sessionName);
+          }
         });
       } catch (error) {
         // Handle listener setup errors gracefully - log but don't crash
@@ -391,6 +511,363 @@ export class WebServerManager {
     this.running = false;
   }
 
+  private async handleTerminalInputMessage(
+    ws: import("ws").WebSocket,
+    data: unknown,
+    sessionName: string
+  ): Promise<void> {
+    try {
+      // Type guard for data
+      if (typeof data !== 'object' || data === null) {
+        this.sendErrorResponse(ws, "Invalid data format", undefined);
+        return;
+      }
+
+      const messageData = data as Record<string, unknown>;
+
+      // Validate session exists
+      if (!this.sshManager.hasSession(sessionName)) {
+        this.sendErrorResponse(ws, `Session '${sessionName}' not found`, 
+          typeof messageData.commandId === 'string' ? messageData.commandId : undefined);
+        return;
+      }
+
+      // Validate required fields
+      if (!messageData.command || typeof messageData.command !== 'string') {
+        this.sendErrorResponse(ws, "Command is required and must be a string", 
+          typeof messageData.commandId === 'string' ? messageData.commandId : undefined);
+        return;
+      }
+
+      if (!messageData.commandId || typeof messageData.commandId !== 'string') {
+        this.sendErrorResponse(ws, "CommandId is required and must be a string", 
+          typeof messageData.commandId === 'string' ? messageData.commandId : undefined);
+        return;
+      }
+
+      const commandId = messageData.commandId as string;
+      const command = messageData.command as string;
+      
+      // Lock terminal for user command (AC5.1)
+      this.lockTerminalForSession(sessionName, commandId, 'user');
+      
+      // Store command in session history
+      const sessionState = this.getOrCreateSessionState(sessionName);
+      const historyEntry = sessionState.commandHistory.find(h => h.commandId === commandId);
+      if (historyEntry) {
+        historyEntry.command = command;
+      }
+
+      // Send visual indicator for user execution (AC5.2)
+      this.broadcastVisualIndicator(sessionName, 'user_command_executing', 'user', { commandId });
+      
+      // Send processing state (AC5.2)
+      this.broadcastProcessingState(sessionName, 'executing', commandId);
+
+      try {
+        // Execute command with user source
+        await this.sshManager.executeCommand(
+          sessionName, 
+          command,
+          { source: 'user' }
+        );
+
+        // Output is already broadcast by SSH manager to WebSocket listeners
+        // No need to send duplicate response here
+
+        // Unlock terminal after successful command completion (AC5.1)
+        this.unlockTerminalForSession(sessionName, commandId, 'user');
+        
+        // Send completion processing state (AC5.2)
+        this.broadcastProcessingState(sessionName, 'completed', commandId);
+        
+        // Send ready state for immediate recovery (AC5.5)
+        if (ws.readyState === ws.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'terminal_ready',
+            sessionName,
+            timestamp: new Date().toISOString()
+          }));
+        }
+
+      } catch (error) {
+        // Handle command errors gracefully (AC5.5)
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        
+        // Send error response with source identification (AC5.5)
+        const errorResponse = {
+          type: 'command_error',
+          sessionName,
+          source: 'user',
+          commandId: commandId,
+          errorMessage: errorMessage,
+          timestamp: new Date().toISOString()
+        };
+
+        if (ws.readyState === ws.OPEN) {
+          ws.send(JSON.stringify(errorResponse));
+        }
+
+        // Unlock terminal after error (AC5.5)
+        this.unlockTerminalForSession(sessionName, commandId, 'user');
+        
+        // Send error processing state
+        this.broadcastProcessingState(sessionName, 'error', commandId);
+        
+        // Send ready state for immediate recovery (AC5.5) 
+        if (ws.readyState === ws.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'terminal_ready',
+            sessionName,
+            timestamp: new Date().toISOString()
+          }));
+        }
+      }
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const messageData = typeof data === 'object' && data !== null ? data as Record<string, unknown> : {};
+      this.sendErrorResponse(ws, `Command execution failed: ${errorMessage}`, 
+        typeof messageData.commandId === 'string' ? messageData.commandId : undefined);
+    }
+  }
+
+  private sendErrorResponse(
+    ws: import("ws").WebSocket,
+    message: string,
+    commandId?: string
+  ): void {
+    if (ws.readyState === ws.OPEN) {
+      const errorResponse = {
+        type: 'error',
+        message,
+        commandId,
+        timestamp: new Date().toISOString()
+      };
+      ws.send(JSON.stringify(errorResponse));
+    }
+  }
+
+  private setupClaudeCommandMonitoring(): void {
+    // This would typically be implemented by hooking into the SSHConnectionManager's
+    // command execution pipeline to detect Claude Code commands and provide visual indicators
+    // For now, we'll monitor via the output listener mechanism
+    
+    // Note: In a full implementation, we would extend the SSHConnectionManager
+    // to emit command events that we can listen to here
+  }
+
+  // Terminal state synchronization methods
+  private getOrCreateSessionState(sessionName: string): SessionState {
+    if (!this.sessionStates.has(sessionName)) {
+      this.sessionStates.set(sessionName, {
+        terminalLockState: {
+          isLocked: false,
+          commandId: null,
+          source: null,
+          timestamp: Date.now(),
+          sessionName
+        },
+        connectedClients: new Set(),
+        lastActivity: Date.now(),
+        commandHistory: []
+      });
+    }
+    return this.sessionStates.get(sessionName)!;
+  }
+
+  private lockTerminalForSession(sessionName: string, commandId: string, source: 'user' | 'claude'): void {
+    const sessionState = this.getOrCreateSessionState(sessionName);
+    
+    // Only lock for user commands, not Claude commands (AC5.1)
+    if (source === 'user') {
+      sessionState.terminalLockState = {
+        isLocked: true,
+        commandId,
+        source,
+        timestamp: Date.now(),
+        sessionName
+      };
+      
+      // Add to command history
+      sessionState.commandHistory.push({
+        commandId,
+        command: '', // Will be filled when we have the actual command
+        source,
+        timestamp: Date.now(),
+        completed: false
+      });
+
+      // Broadcast lock state to all connected clients (AC5.3)
+      this.broadcastTerminalLockState(sessionName, sessionState.terminalLockState);
+    }
+  }
+
+  private unlockTerminalForSession(sessionName: string, commandId: string, source: 'user' | 'claude'): void {
+    const sessionState = this.getOrCreateSessionState(sessionName);
+    
+    // Only unlock if this is the command that locked the terminal and it's a user command
+    if (sessionState.terminalLockState.isLocked && 
+        sessionState.terminalLockState.commandId === commandId &&
+        sessionState.terminalLockState.source === 'user' &&
+        source === 'user') {
+      
+      sessionState.terminalLockState = {
+        isLocked: false,
+        commandId: null,
+        source: null,
+        timestamp: Date.now(),
+        sessionName
+      };
+
+      // Mark command as completed in history
+      const historyEntry = sessionState.commandHistory.find(h => h.commandId === commandId);
+      if (historyEntry) {
+        historyEntry.completed = true;
+      }
+
+      // Broadcast unlock state to all connected clients (AC5.3)
+      this.broadcastTerminalLockState(sessionName, sessionState.terminalLockState);
+    }
+  }
+
+  private broadcastTerminalLockState(sessionName: string, lockState: TerminalLockState): void {
+    const sessionState = this.sessionStates.get(sessionName);
+    if (!sessionState) return;
+
+    const message = JSON.stringify({
+      type: 'terminal_lock_state',
+      sessionName,
+      isLocked: lockState.isLocked,
+      commandId: lockState.commandId,
+      source: lockState.source,
+      timestamp: new Date(lockState.timestamp).toISOString()
+    });
+
+    // Send to all connected clients for this session (AC5.3)
+    sessionState.connectedClients.forEach(client => {
+      if (client.readyState === client.OPEN) {
+        client.send(message);
+      }
+    });
+  }
+
+  private broadcastVisualIndicator(sessionName: string, indicatorType: string, source: 'user' | 'claude', data?: any): void {
+    const sessionState = this.sessionStates.get(sessionName);
+    if (!sessionState) return;
+
+    const message = JSON.stringify({
+      type: 'visual_state_indicator',
+      sessionName,
+      indicatorType,
+      source,
+      timestamp: new Date().toISOString(),
+      ...data
+    });
+
+    sessionState.connectedClients.forEach(client => {
+      if (client.readyState === client.OPEN) {
+        client.send(message);
+      }
+    });
+  }
+
+  private broadcastProcessingState(sessionName: string, state: 'executing' | 'completed' | 'error', commandId?: string): void {
+    const sessionState = this.sessionStates.get(sessionName);
+    if (!sessionState) return;
+
+    const message = JSON.stringify({
+      type: 'processing_state',
+      sessionName,
+      state,
+      commandId,
+      timestamp: new Date().toISOString()
+    });
+
+    sessionState.connectedClients.forEach(client => {
+      if (client.readyState === client.OPEN) {
+        client.send(message);
+      }
+    });
+  }
+
+  private addClientToSession(sessionName: string, client: import("ws").WebSocket): void {
+    const sessionState = this.getOrCreateSessionState(sessionName);
+    sessionState.connectedClients.add(client);
+    
+    // Send current terminal lock state to new client (AC5.4 - State recovery)
+    const recoveryMessage = JSON.stringify({
+      type: 'terminal_lock_state_recovery',
+      sessionName,
+      isLocked: sessionState.terminalLockState.isLocked,
+      commandId: sessionState.terminalLockState.commandId,
+      source: sessionState.terminalLockState.source,
+      timestamp: new Date(sessionState.terminalLockState.timestamp).toISOString()
+    });
+    
+    if (client.readyState === client.OPEN) {
+      client.send(recoveryMessage);
+    }
+  }
+
+  private removeClientFromSession(sessionName: string, client: import("ws").WebSocket): void {
+    const sessionState = this.sessionStates.get(sessionName);
+    if (sessionState) {
+      sessionState.connectedClients.delete(client);
+    }
+  }
+
+  private handleStateRecoveryRequest(ws: import("ws").WebSocket, sessionName: string): void {
+    const sessionState = this.getOrCreateSessionState(sessionName);
+    
+    if (ws.readyState === ws.OPEN) {
+      // Send current state to requesting client (AC5.4)
+      const recoveryMessage = JSON.stringify({
+        type: 'terminal_lock_state_recovery',
+        sessionName,
+        isLocked: sessionState.terminalLockState.isLocked,
+        commandId: sessionState.terminalLockState.commandId,
+        source: sessionState.terminalLockState.source,
+        timestamp: new Date(sessionState.terminalLockState.timestamp).toISOString()
+      });
+      ws.send(recoveryMessage);
+
+      // Send graceful recovery indication
+      ws.send(JSON.stringify({
+        type: 'graceful_recovery',
+        sessionName,
+        timestamp: new Date().toISOString()
+      }));
+    }
+  }
+
+  private handleMalformedMessage(ws: import("ws").WebSocket, sessionName: string): void {
+    if (ws.readyState === ws.OPEN) {
+      // Handle malformed messages gracefully (AC5.5)
+      const response = JSON.stringify({
+        type: 'malformed_message_handled',
+        sessionName,
+        message: 'Invalid message format handled gracefully',
+        timestamp: new Date().toISOString()
+      });
+      ws.send(response);
+    }
+  }
+
+  /**
+   * Creates a standardized error response with consistent structure
+   * Used throughout the application for uniform error handling
+   */
+  public createStandardizedErrorResponse(error: Error, commandId?: string): ErrorResponse {
+    return {
+      error: error.name || 'Error',
+      message: error.message,
+      timestamp: Date.now(),
+      code: error.name?.toUpperCase().replace(/ERROR$/, '') || 'UNKNOWN',
+      ...(commandId && { commandId })
+    };
+  }
+
   // Public API methods for testing and monitoring
 
   async getPort(): Promise<number> {
@@ -415,5 +892,32 @@ export class WebServerManager {
 
   getMCPPort(): never {
     throw new Error("MCP functionality not available in pure web server");
+  }
+
+  // Public method to handle Claude Code command execution for integration
+  public async handleClaudeCodeCommand(sessionName: string, command: string): Promise<void> {
+    // This method allows external code (like tests) to simulate Claude Code commands
+    // that should provide visual indicators but not affect terminal lock state
+    
+    if (!this.sshManager.hasSession(sessionName)) {
+      return;
+    }
+
+    // Send visual indicator for Claude Code execution (AC5.2)
+    this.broadcastVisualIndicator(sessionName, 'claude_command_executing', 'claude', { command });
+
+    try {
+      // Execute the command as Claude Code (does not lock terminal)
+      await this.sshManager.executeCommand(sessionName, command, { source: 'claude' });
+      
+      // Send visual indicator for completion
+      this.broadcastVisualIndicator(sessionName, 'claude_command_completed', 'claude', { command });
+    } catch (error) {
+      // Send visual indicator for error
+      this.broadcastVisualIndicator(sessionName, 'claude_command_error', 'claude', { 
+        command, 
+        error: error instanceof Error ? error.message : String(error) 
+      });
+    }
   }
 }

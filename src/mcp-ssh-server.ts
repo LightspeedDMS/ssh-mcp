@@ -361,6 +361,7 @@ export class MCPSSHServer {
 
     const result = await this.sshManager.executeCommand(sessionName, command, {
       timeout,
+      source: 'claude',
     });
 
     return {
