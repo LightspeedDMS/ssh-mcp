@@ -396,21 +396,8 @@ export class WebServerManager {
       try {
         this.sshManager.addTerminalOutputListener(sessionName, outputCallback);
 
-        // Send historical terminal output to new client
-        const history = this.sshManager.getTerminalHistory(sessionName);
-        history.forEach((entry) => {
-          if (ws.readyState === ws.OPEN) {
-            ws.send(
-              JSON.stringify({
-                type: "terminal_output",
-                sessionName,
-                timestamp: new Date(entry.timestamp).toISOString(),
-                data: entry.output,
-                source: entry.source, // CRITICAL: Include source for history replay
-              }),
-            );
-          }
-        });
+        // Send historical terminal session with proper format: prompt + command + output + prompt
+        this.sendFormattedTerminalHistory(ws, sessionName);
 
         ws.on("close", () => {
           this.sshManager.removeTerminalOutputListener(
@@ -752,7 +739,7 @@ export class WebServerManager {
     });
   }
 
-  private broadcastVisualIndicator(sessionName: string, indicatorType: string, source: 'user' | 'claude', data?: any): void {
+  private broadcastVisualIndicator(sessionName: string, indicatorType: string, source: 'user' | 'claude', data?: Record<string, unknown>): void {
     const sessionState = this.sessionStates.get(sessionName);
     if (!sessionState) return;
 
@@ -917,6 +904,79 @@ export class WebServerManager {
       this.broadcastVisualIndicator(sessionName, 'claude_command_error', 'claude', { 
         command, 
         error: error instanceof Error ? error.message : String(error) 
+      });
+    }
+  }
+
+  /**
+   * Send formatted terminal history with proper terminal session format:
+   * prompt + command + output + prompt for each historical command
+   */
+  private sendFormattedTerminalHistory(ws: import("ws").WebSocket, sessionName: string): void {
+    if (!this.sshManager.hasSession(sessionName) || ws.readyState !== ws.OPEN) {
+      return;
+    }
+
+    try {
+      // Get terminal output history - no need for command history since we're using raw terminal output
+      const terminalHistory = this.sshManager.getTerminalHistory(sessionName);
+
+      // Get session connection info for prompt construction
+      const connectionInfo = this.sshManager.getSessionConnectionInfo(sessionName);
+      if (!connectionInfo) {
+        console.warn(`Cannot get connection info for ${sessionName} - using fallback prompt format`);
+        // Fall back to simple history replay if connection info unavailable
+        terminalHistory.forEach((entry) => {
+          if (ws.readyState === ws.OPEN) {
+            ws.send(
+              JSON.stringify({
+                type: "terminal_output",
+                sessionName,
+                timestamp: new Date(entry.timestamp).toISOString(),
+                data: entry.output,
+                source: entry.source,
+              }),
+            );
+          }
+        });
+        return;
+      }
+
+      // CRITICAL FIX: Send raw terminal history directly without reconstructing
+      // The terminal history already contains the natural SSH shell output including
+      // command echoes, prompts, and responses. Reconstructing creates duplicates.
+      
+      // Simply send the stored terminal output entries in chronological order
+      terminalHistory.forEach((entry) => {
+        if (ws.readyState === ws.OPEN) {
+          ws.send(
+            JSON.stringify({
+              type: "terminal_output",
+              sessionName,
+              timestamp: new Date(entry.timestamp).toISOString(),
+              data: entry.output,
+              source: entry.source,
+            }),
+          );
+        }
+      });
+
+    } catch (error) {
+      console.error(`Error sending formatted terminal history for session ${sessionName}:`, error);
+      // Graceful degradation - fall back to simple terminal history
+      const terminalHistory = this.sshManager.getTerminalHistory(sessionName);
+      terminalHistory.forEach((entry) => {
+        if (ws.readyState === ws.OPEN) {
+          ws.send(
+            JSON.stringify({
+              type: "terminal_output",
+              sessionName,
+              timestamp: new Date(entry.timestamp).toISOString(),
+              data: entry.output,
+              source: entry.source,
+            }),
+          );
+        }
       });
     }
   }

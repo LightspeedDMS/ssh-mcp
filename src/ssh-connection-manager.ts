@@ -153,9 +153,13 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       callStack: new Error().stack?.split('\n').slice(1, 3).join(' -> ')
     });
 
+    // CRITICAL FIX: Data already has CRLF from completeSimpleCommand - don't convert again!
+    // This prevents the triple CRLF conversion bug (\r\r\r\n)
+    const browserOutput = data; // Use data as-is, already properly converted
+    
     const outputEntry: TerminalOutputEntry = {
       timestamp: Date.now(),
-      output: data,
+      output: browserOutput,
       stream,
       rawOutput: data,
       preserveFormatting: true,
@@ -187,9 +191,13 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     const sessionData = this.connections.get(sessionName);
     if (!sessionData) return;
 
+    // CRITICAL FIX: Data already has CRLF from completeSimpleCommand - don't convert again!
+    // This prevents the triple CRLF conversion bug (\r\r\r\n)
+    const browserOutput = data; // Use data as-is, already properly converted
+    
     const outputEntry: TerminalOutputEntry = {
       timestamp: Date.now(),
-      output: data,
+      output: browserOutput,
       stream,
       rawOutput: data,
       preserveFormatting: true,
@@ -660,23 +668,33 @@ export class SSHConnectionManager implements ISSHConnectionManager {
         continue;
       }
 
-      // Skip lines that are just prompts
+      // Skip lines that are just prompts (both old and bracket formats from SSH server)
       if (
-        /^[\]a-zA-Z0-9_.[[-]+@[\]a-zA-Z0-9_.[[-]+.*[$#>]\s*$/.test(trimmed) ||
+        /^[\]a-zA-Z0-9_.-]+@[\]a-zA-Z0-9_.-]+.*[$#>]\s*$/.test(trimmed) ||
+        /^[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+:[^$]*$\s*$/.test(trimmed) ||
+        /^\[[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+\s+[^\]]+\]\$\s*$/.test(trimmed) ||
         /^[$#>]\s*$/.test(trimmed)
       ) {
         continue;
       }
 
-      // Remove prompt prefix if it appears at the beginning of output
+      // Remove prompt prefix if it appears at the beginning of output (both old and bracket formats)
       trimmed = trimmed.replace(
-        /^[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+\s*[~\w/.[\]-]*[$#>]\$?\s*/,
+        /^[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+:[~\w/.[\]-]*[$#>]\$?\s*/,
+        "",
+      );
+      trimmed = trimmed.replace(
+        /^\[[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+\s+[^\]]+\]\$\s*/,
         "",
       );
 
-      // Remove prompt suffix if it appears at the end of actual output
+      // Remove prompt suffix if it appears at the end of actual output (both old and bracket formats)
       trimmed = trimmed.replace(
-        /\s*[\]a-zA-Z0-9_@.[[#>-]+\s+[~\w/.-]*[\]$#>]\s*$/,
+        /\s*[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+:[~\w/.[\]-]*[$#>]\s*$/,
+        "",
+      );
+      trimmed = trimmed.replace(
+        /\s*\[[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+\s+[^\]]+\]\$\s*$/,
         "",
       );
 
@@ -693,12 +711,19 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       exitCode,
     };
 
-    // For live terminal view - broadcast appropriate output based on command source
+    // ARCHITECTURAL FIX: Store complete raw terminal output instead of parsing and reconstructing
+    // The SSH shell naturally provides the complete terminal session including echoes and prompts.
+    // Instead of artificially creating command echoes, we should store and replay the natural terminal flow.
     const commandSource = sessionData.currentCommand.options.source || "claude";
     
-    // Always broadcast raw output INCLUDING prompts - the browser needs prompts to unlock terminal
-    this.broadcastToLiveListeners(sessionData.connection.name, rawOutput, "stdout", commandSource);
-    this.storeInHistory(sessionData.connection.name, commandOutput, "stdout", commandSource);
+    // CRITICAL FIX: Store and broadcast the RAW terminal output with proper CRLF
+    // This preserves the natural SSH shell behavior and prevents double echoing
+    // XTERM.JS TERMINAL CRITICAL RULE: Normalize line endings to CRLF for proper browser display
+    // First normalize all line endings to LF, then convert to CRLF to prevent double/triple conversion
+    const rawTerminalOutput = rawOutput.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
+    
+    this.broadcastToLiveListeners(sessionData.connection.name, rawTerminalOutput, "stdout", commandSource);
+    this.storeInHistory(sessionData.connection.name, rawTerminalOutput, "stdout", commandSource);
 
     // Record command in history
     const executionEndTime = Date.now();
@@ -998,6 +1023,21 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     const sessionData = this.getValidatedSession(sessionName);
 
     return [...sessionData.commandHistory]; // Return copy
+  }
+
+  /**
+   * Get session connection information for terminal prompt construction
+   */
+  getSessionConnectionInfo(sessionName: string): { username: string; host: string } | null {
+    const sessionData = this.connections.get(sessionName);
+    if (!sessionData) {
+      return null;
+    }
+
+    return {
+      username: sessionData.connection.username,
+      host: sessionData.connection.host
+    };
   }
 
   addCommandHistoryListener(

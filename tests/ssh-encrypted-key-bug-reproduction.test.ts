@@ -6,15 +6,21 @@
  */
 
 import * as fs from 'fs/promises';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
 import { SSHConnectionManager } from '../src/ssh-connection-manager.js';
 import { SSHConnectionConfig } from '../src/types.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, '..');
 
 describe('Encrypted SSH Key Passphrase Bug Fix Verification', () => {
   let connectionManager: SSHConnectionManager;
   
   // Test key paths and passphrases from ssh2 fixtures
-  const RSA_ENCRYPTED_KEY_PATH = '/home/jsbattig/Dev/ls-ssh-mcp/node_modules/ssh2/test/fixtures/id_rsa_enc';
-  const OPENSSH_NEW_RSA_ENCRYPTED_KEY_PATH = '/home/jsbattig/Dev/ls-ssh-mcp/node_modules/ssh2/test/fixtures/keyParser/openssh_new_rsa_enc';
+  const RSA_ENCRYPTED_KEY_PATH = path.join(projectRoot, 'node_modules/ssh2/test/fixtures/id_rsa_enc');
+  const OPENSSH_NEW_RSA_ENCRYPTED_KEY_PATH = path.join(projectRoot, 'node_modules/ssh2/test/fixtures/keyParser/openssh_new_rsa_enc');
   const TEST_PASSPHRASE = 'foobarbaz';
 
   beforeEach(() => {

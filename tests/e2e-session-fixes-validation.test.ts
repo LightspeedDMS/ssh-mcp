@@ -1,5 +1,7 @@
 import { SSHConnectionManager } from "../src/ssh-connection-manager";
 import { SSHConnectionConfig } from "../src/types";
+import * as os from 'os';
+import * as path from 'path';
 
 describe("E2E Session Fixes Validation", () => {
   let connectionManager: SSHConnectionManager;
@@ -7,7 +9,7 @@ describe("E2E Session Fixes Validation", () => {
     name: "e2e-session-fixes",
     host: "localhost",
     username: "jsbattig",
-    keyFilePath: "/home/jsbattig/.ssh/id_ed25519",
+    keyFilePath: path.join(os.homedir(), '.ssh/id_ed25519'),
   };
 
   beforeEach(() => {

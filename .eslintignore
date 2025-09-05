@@ -11,4 +11,4 @@ static/xterm-addon-fit.js
 ssh-mcp-persistent.js
 standalone-server.js
 # Test files with special configurations
-tests/
+# tests/  -- Removed to allow ESLint processing of test files
