@@ -344,10 +344,14 @@ export class SSHConnectionManager implements ISSHConnectionManager {
           if (hasPrompt) {
             channel.removeListener("data", onData);
             sessionData.isShellReady = true;
+            sessionData.initialPromptShown = true;
             this.setupShellHandlers(sessionData);
 
-            // Shell is ready - no need to broadcast initial prompt
-            // The prompt will be shown when commands are executed
+            // MISSING INITIAL PROMPT FIX: Broadcast initial prompt so browser terminals can display it
+            // Convert line endings to CRLF for xterm.js compatibility
+            const initialPromptOutput = initOutput.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
+            this.broadcastToLiveListeners(sessionData.connection.name, initialPromptOutput, "stdout", 'system');
+            this.storeInHistory(sessionData.connection.name, initialPromptOutput, "stdout", 'system');
 
             resolve();
           }
