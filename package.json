@@ -6,6 +6,7 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc && cp -r static dist/",
+    "build:client": "tsc static/terminal-input-handler.ts --target ES2017 --lib ES2017,DOM --outDir static --skipLibCheck --removeComments false",
     "start": "node dist/src/mcp-server.js",
     "test": "jest",
     "test:watch": "jest --watch",

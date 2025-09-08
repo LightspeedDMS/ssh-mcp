@@ -1,6 +1,10 @@
 # LS-SSH-MCP Project Documentation
 
-## Terminal History Testing Framework
+## Villenele - Terminal History Testing Framework
+
+**Framework Name**: **Villenele**
+
+Villenele is the official name for our comprehensive Terminal History Testing Framework. When referenced by name, "Villenele" refers to the complete 9-story epic testing infrastructure designed specifically for SSH terminal emulation validation.
 
 ### Purpose and Overview
 
@@ -199,3 +203,51 @@ tests/
 7. **Debugging Support**: Enhanced error diagnostics and troubleshooting capabilities
 
 This framework provides the definitive solution for validating SSH terminal emulation and browser terminal display formatting, ensuring proper prompt handling, command separation, and xterm.js compatibility.
+
+## MCP Server URL Management - CRITICAL WORKFLOW
+
+### Dynamic Port Discovery
+**GOLDEN RULE**: NEVER hardcode port numbers when testing terminal URLs. The MCP server uses dynamic ports that change between sessions.
+
+### Proper Workflow for Terminal URL Testing
+1. **Connect via MCP**: Always use `mcp__ssh__ssh_connect` to establish sessions
+2. **Get Dynamic URL**: Use `mcp__ssh__ssh_get_monitoring_url` to retrieve the actual URL
+3. **Test with Real URL**: Use the MCP-provided URL for all testing and validation
+
+### Example Workflow
+```typescript
+// ✅ CORRECT: Use MCP server for dynamic URL
+const connection = await mcp__ssh__ssh_connect({
+  name: "test-session",
+  host: "localhost", 
+  username: "jsbattig",
+  keyFilePath: "/home/jsbattig/.ssh/id_ed25519"
+});
+
+const urlResponse = await mcp__ssh__ssh_get_monitoring_url({
+  sessionName: "test-session"
+});
+
+// Use urlResponse.monitoringUrl for testing
+console.log(`Terminal URL: ${urlResponse.monitoringUrl}`);
+```
+
+### Common Mistakes to Avoid
+- ❌ **WRONG**: `http://localhost:8085/session/my-session` (hardcoded port)  
+- ✅ **CORRECT**: Use MCP server's `monitoringUrl` response
+
+### WebSocket Connection Debugging
+When encountering "⚠️ Message Error" in browser terminals:
+
+1. **Verify HTML loads**: `curl -s [MCP_URL] | head -20`
+2. **Verify JavaScript loads**: `curl -s [MCP_URL_BASE]/terminal-input-handler.js | head -10`
+3. **Test WebSocket endpoint**: `curl -v -H "Connection: Upgrade" -H "Upgrade: websocket" [MCP_URL_BASE]/ws/session/[SESSION_NAME]`
+4. **Check browser console** for specific WebSocket connection errors
+
+### URL Structure Understanding
+- **HTML Endpoint**: `http://localhost:[DYNAMIC_PORT]/session/[SESSION_NAME]`
+- **WebSocket Endpoint**: `ws://localhost:[DYNAMIC_PORT]/ws/session/[SESSION_NAME]`
+- **Static Assets**: `http://localhost:[DYNAMIC_PORT]/terminal-input-handler.js`
+
+**Port Discovery**: Only the MCP server knows the current port. Always query it first.
+- every time you change anything related to conversation display, when you are done doing changes, you must run all Villenele tests, always, no exceptions.

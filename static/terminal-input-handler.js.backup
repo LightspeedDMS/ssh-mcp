@@ -10,7 +10,7 @@
  * Production Terminal Input Handler
  * Handles real terminal input with security, validation, and proper state management
  */
-class TerminalInputHandler {
+export class TerminalInputHandler {
     constructor(terminal, webSocket, sessionName, config = {}) {
         this.commandCounter = 0;
         this.terminal = terminal;

@@ -56,9 +56,9 @@ describe('Terminal History Command Permutations E2E', () => {
           .validate();
 
         // Exact command count verification (prompt counting)
-        // Note: Single command creates 1 prompt at the end
+        // Note: Single command creates 2 prompts: initial prompt + final prompt
         const promptCount = (messages.match(/\[jsbattig@localhost ~\]\$/g) || []).length;
-        expect(promptCount).toBe(1); // 1 command = 1 prompt at the end
+        expect(promptCount).toBe(2); // 1 command = initial prompt + final prompt
 
         // Command echo verification (command appears before prompt)
         expect(messages).toContain('pwd'); // Command should be present

@@ -92,7 +92,7 @@ export class Orchestrator {
       // Write port file for Claude Code MCP connection
       await this.writePortToFile(this.webPort!);
 
-      console.log(`MCP SSH Server started - MCP: stdio, Web: ${this.webPort}`);
+      // MCP SSH Server started - MCP: stdio, Web: ${this.webPort}
     } catch (error) {
       await this.cleanup();
       throw error;
