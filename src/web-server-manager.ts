@@ -227,7 +227,7 @@ export class WebServerManager {
                 cursor: '#ffffff',
                 selection: '#ffffff'
             },
-            fontSize: 14,
+            fontSize: 16,
             fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
             cursorBlink: true
         });
