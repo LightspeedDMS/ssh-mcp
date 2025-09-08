@@ -39,6 +39,10 @@ interface SSHGetMonitoringUrlArgs {
   sessionName: string;
 }
 
+interface SSHCancelCommandArgs {
+  sessionName: string;
+}
+
 /**
  * Pure MCP SSH Server - Uses stdio transport only, no HTTP functionality
  * This server provides SSH tools via MCP protocol without any web interface
@@ -251,6 +255,20 @@ export class MCPSSHServer {
               required: ["sessionName"],
             },
           },
+          {
+            name: "ssh_cancel_command",
+            description: "Cancel currently running MCP command for specified SSH session",
+            inputSchema: {
+              type: "object",
+              properties: {
+                sessionName: {
+                  type: "string",
+                  description: "Name of SSH session to cancel command for",
+                },
+              },
+              required: ["sessionName"],
+            },
+          },
         ],
       };
     });
@@ -276,6 +294,10 @@ export class MCPSSHServer {
           case "ssh_get_monitoring_url":
             return await this.handleSSHGetMonitoringUrl(
               args as unknown as SSHGetMonitoringUrlArgs,
+            );
+          case "ssh_cancel_command":
+            return await this.handleSSHCancelCommand(
+              args as unknown as SSHCancelCommandArgs,
             );
           default:
             throw new Error(`Unknown tool: ${name}`);
@@ -359,6 +381,35 @@ export class MCPSSHServer {
       );
     }
 
+    // Check for browser command buffer content before execution
+    const browserCommandBuffer = this.sshManager.getBrowserCommandBuffer(sessionName);
+    if (browserCommandBuffer.length > 0) {
+      // Return complete browser commands with results for informed decision-making
+      const browserCommands = browserCommandBuffer;
+      
+      // Create CommandGatingError response
+      const errorResponse = {
+        success: false,
+        error: 'BROWSER_COMMANDS_EXECUTED' as const,
+        message: 'User executed commands directly in browser',
+        browserCommands,
+        retryAllowed: true
+      };
+
+      // Clear buffer AFTER error response is created (per pseudocode requirement)
+      this.sshManager.clearBrowserCommandBuffer(sessionName);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(errorResponse, null, 2),
+          },
+        ],
+      };
+    }
+
+    // Normal execution when buffer is empty
     const result = await this.sshManager.executeCommand(sessionName, command, {
       timeout,
       source: 'claude',
@@ -481,6 +532,89 @@ export class MCPSSHServer {
     };
   }
 
+  private async handleSSHCancelCommand(
+    args: SSHCancelCommandArgs,
+  ): Promise<{
+    content: Array<{
+      type: string;
+      text: string;
+    }>;
+  }> {
+    const { sessionName } = args;
+
+    // Story 02: MCP Command Cancellation - Cancel only MCP commands
+    
+    // Check if session exists
+    if (!this.sshManager.hasSession(sessionName)) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                success: false,
+                error: "SESSION_NOT_FOUND",
+                message: `SSH session '${sessionName}' not found`,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    }
+
+    // Get current browser command buffer to check for MCP commands
+    const browserCommandBuffer = this.sshManager.getBrowserCommandBuffer(sessionName);
+    const mcpCommands = browserCommandBuffer.filter(cmd => cmd.source === 'claude');
+
+    if (mcpCommands.length === 0) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                success: false,
+                error: "NO_ACTIVE_MCP_COMMAND",
+                message: "No active MCP command to cancel",
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    }
+
+    // Cancel MCP commands by clearing only MCP (claude) commands from buffer
+    // This is similar to browser cancellation but only affects MCP commands
+    const updatedBuffer = browserCommandBuffer.filter(cmd => cmd.source !== 'claude');
+    
+    // Clear and refill buffer with only non-MCP commands
+    this.sshManager.clearBrowserCommandBuffer(sessionName);
+    updatedBuffer.forEach(cmd => {
+      this.sshManager.addBrowserCommand(sessionName, cmd.command, cmd.commandId, cmd.source);
+    });
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              success: true,
+              message: `Cancelled ${mcpCommands.length} MCP command(s)`,
+              cancelledCommands: mcpCommands.map(cmd => cmd.command),
+            },
+            null,
+            2,
+          ),
+        },
+      ],
+    };
+  }
+
   // Public API methods for testing and coordination
 
   isMCPRunning(): boolean {
@@ -499,6 +633,7 @@ export class MCPSSHServer {
       "ssh_list_sessions",
       "ssh_disconnect",
       "ssh_get_monitoring_url",
+      "ssh_cancel_command",
     ];
   }
 
@@ -530,6 +665,12 @@ export class MCPSSHServer {
             args as SSHGetMonitoringUrlArgs,
           );
           return JSON.parse(urlResult.content[0].text);
+        }
+        case "ssh_cancel_command": {
+          const cancelResult = await this.handleSSHCancelCommand(
+            args as SSHCancelCommandArgs,
+          );
+          return JSON.parse(cancelResult.content[0].text);
         }
         default:
           return { success: false, error: `Unknown tool: ${name}` };

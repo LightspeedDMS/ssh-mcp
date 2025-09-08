@@ -99,7 +99,7 @@ describe('CRLF Command Output Validation - TDD', () => {
               const beforePrompt = terminalOutput.substring(0, promptIndex);
               // Check that we have CRLF followed by optional ANSI escape sequences before the prompt
               // ANSI sequences can be complex: \u001b[?2004h, \u001b[0m, etc.
-              const crlfWithOptionalAnsiPattern = /\r\n(?:\u001b\[[?0-9;]*[a-zA-Z])*$/;
+              const crlfWithOptionalAnsiPattern = new RegExp('\\r\\n(?:\\u001b\\[[?0-9;]*[a-zA-Z])*$');
               expect(beforePrompt).toMatch(crlfWithOptionalAnsiPattern);
               console.log(`✅ Prompt ${i + 1} is properly preceded by CRLF (with optional ANSI sequences)`);
             }

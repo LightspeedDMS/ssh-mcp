@@ -23,6 +23,8 @@ describe("MCPSSHServer", () => {
       updateWebServerPort: jest.fn(),
       addTerminalOutputListener: jest.fn(),
       removeTerminalOutputListener: jest.fn(),
+      getBrowserCommandBuffer: jest.fn().mockReturnValue([]),
+      clearBrowserCommandBuffer: jest.fn(),
     } as any;
   });
 

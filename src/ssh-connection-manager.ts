@@ -6,6 +6,7 @@ import * as path from "path";
 import {
   SSHConnection,
   SSHConnectionConfig,
+  SSHConnectConfig,
   ConnectionStatus,
   CommandResult,
   CommandOptions,
@@ -13,6 +14,7 @@ import {
   ErrorResponse,
   QueuedCommand,
   QUEUE_CONSTANTS,
+  BrowserCommandEntry,
 } from "./types.js";
 
 export interface ISSHConnectionManager {
@@ -39,6 +41,11 @@ export interface ISSHConnectionManager {
     sessionName: string,
     callback: (entry: CommandHistoryEntry) => void,
   ): void;
+  // Server-Side Command Capture API
+  getBrowserCommandBuffer(sessionName: string): BrowserCommandEntry[];
+  clearBrowserCommandBuffer(sessionName: string): void;
+  addBrowserCommand(sessionName: string, command: string, commandId: string, source: 'user' | 'claude'): void;
+  updateBrowserCommandResult(sessionName: string, commandId: string, result: CommandResult): void;
 }
 
 export interface TerminalOutputEntry {
@@ -73,6 +80,8 @@ interface SessionData {
   outputListeners: TerminalOutputListener[];
   commandHistory: CommandHistoryEntry[];
   commandHistoryListeners: CommandHistoryListener[];
+  // Browser command capture buffer for server-side command tracking
+  browserCommandBuffer: BrowserCommandEntry[];
   currentCommand?: {
     command: string;
     resolve: (result: CommandResult) => void;
@@ -92,6 +101,15 @@ interface SessionData {
   // Command echo state tracking for duplicate removal
   lastCommandSent?: string;
   expectingCommandEcho: boolean;
+  // Nuclear Fallback - Story 01: Timeout Detection
+  nuclearFallback?: {
+    timeoutHandle: ReturnType<typeof setTimeout>;
+    startTime: number;
+    duration: number;
+    reason: 'browser_cancellation' | 'mcp_cancellation';
+    triggered: boolean;
+    lastFallbackReason?: string;
+  };
 }
 
 // Terminal output streaming interfaces
@@ -99,6 +117,7 @@ interface SessionData {
 export class SSHConnectionManager implements ISSHConnectionManager {
   private static readonly MAX_OUTPUT_BUFFER_SIZE = 1000;
   private static readonly MAX_COMMAND_HISTORY_SIZE = 100;
+  private static readonly MAX_BROWSER_COMMAND_BUFFER_SIZE = 500;
   
   private connections: Map<string, SessionData> = new Map();
   private webServerPort: number;
@@ -272,6 +291,8 @@ export class SSHConnectionManager implements ISSHConnectionManager {
           outputListeners: [],
           commandHistory: [],
           commandHistoryListeners: [],
+          // Initialize browser command capture buffer
+          browserCommandBuffer: [],
           commandQueue: [],
           isCommandExecuting: false,
           // SSH server echo management - controlled echo for proper terminal behavior
@@ -425,9 +446,9 @@ export class SSHConnectionManager implements ISSHConnectionManager {
                     let finalPrompt = bracketPromptMatch[0];
                     // Apply ONLY basic control sequence cleaning, not PS1 filtering
                     finalPrompt = finalPrompt
-                      .replace(/\x1b\[[0-9;?]*[a-zA-Zlh]/g, '') // Remove ANSI sequences including bracketed paste mode
+                      .replace(/\u001b\[[0-9;?]*[a-zA-Zlh]/g, '') // Remove ANSI sequences including bracketed paste mode
                       .replace(/\[[?][0-9]+[lh]/g, '') // Remove bracketed paste mode sequences like [?2004l
-                      .replace(/\x1b\][^\x07\x1b]*?\x07?/g, '') // Remove OSC sequences
+                      .replace(/\u001b\][^\u0007\u001b]*?\u0007?/g, '') // Remove OSC sequences
                       .replace(/\r(?!\n)/g, ''); // Remove isolated CR
                     // Initial prompt successfully extracted and cleaned for history replay
                     this.storeInHistory(
@@ -860,6 +881,13 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     });
 
     resolve(result);
+    
+    // Nuclear Fallback - Story 01: Clear timeout on successful command completion
+    if (sessionData.nuclearFallback && !sessionData.nuclearFallback.triggered) {
+      clearTimeout(sessionData.nuclearFallback.timeoutHandle);
+      delete sessionData.nuclearFallback;
+    }
+    
     sessionData.currentCommand = undefined;
 
     // Mark command execution as complete
@@ -890,6 +918,365 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     }
   }
 
+  // Nuclear Fallback - Story 01: Timeout Detection Methods
+  
+  /**
+   * Check if a session has an active nuclear fallback timeout
+   */
+  hasActiveNuclearTimeout(sessionName: string): boolean {
+    const sessionData = this.connections.get(sessionName);
+    return !!(sessionData?.nuclearFallback && !sessionData.nuclearFallback.triggered);
+  }
+
+  /**
+   * Get the configured nuclear timeout duration for a session
+   */
+  getNuclearTimeoutDuration(sessionName: string): number {
+    const sessionData = this.connections.get(sessionName);
+    return sessionData?.nuclearFallback?.duration ?? 30000; // Default 30 seconds
+  }
+
+  /**
+   * Get the nuclear timeout start time for a session
+   */
+  getNuclearTimeoutStartTime(sessionName: string): number {
+    const sessionData = this.connections.get(sessionName);
+    return sessionData?.nuclearFallback?.startTime ?? 0;
+  }
+
+  /**
+   * Check if nuclear fallback has been triggered for a session
+   */
+  hasTriggeredNuclearFallback(sessionName: string): boolean {
+    const sessionData = this.connections.get(sessionName);
+    return !!(sessionData?.nuclearFallback?.triggered);
+  }
+
+  /**
+   * Get the last nuclear fallback reason for a session
+   */
+  getLastNuclearFallbackReason(sessionName: string): string {
+    const sessionData = this.connections.get(sessionName);
+    return sessionData?.nuclearFallback?.lastFallbackReason ?? '';
+  }
+
+  /**
+   * Set nuclear timeout duration (for testing purposes)
+   */
+  async setNuclearTimeoutDuration(duration: number): Promise<void> {
+    // Update all active sessions
+    for (const sessionData of this.connections.values()) {
+      if (sessionData.nuclearFallback && !sessionData.nuclearFallback.triggered) {
+        sessionData.nuclearFallback.duration = duration;
+        // Restart timer with new duration
+        clearTimeout(sessionData.nuclearFallback.timeoutHandle);
+        const remainingTime = duration - (Date.now() - sessionData.nuclearFallback.startTime);
+        if (remainingTime > 0) {
+          sessionData.nuclearFallback.timeoutHandle = setTimeout(async () => {
+            await this.triggerNuclearFallback(sessionData);
+          }, remainingTime);
+        } else {
+          await this.triggerNuclearFallback(sessionData);
+        }
+      }
+    }
+  }
+
+  /**
+   * Clear nuclear timeout for a session
+   */
+  clearNuclearTimeout(sessionName: string): void {
+    const sessionData = this.connections.get(sessionName);
+    if (sessionData?.nuclearFallback) {
+      clearTimeout(sessionData.nuclearFallback.timeoutHandle);
+      delete sessionData.nuclearFallback;
+    }
+  }
+
+  /**
+   * Check if session is healthy (for testing nuclear fallback recovery)
+   */
+  isSessionHealthy(sessionName: string): boolean {
+    const sessionData = this.connections.get(sessionName);
+    return !!(sessionData?.isShellReady && sessionData.shellChannel);
+  }
+
+  /**
+   * Cancel MCP commands and start nuclear timeout
+   */
+  cancelMCPCommands(sessionName: string): { success: boolean; cancelledCommands: string[] } {
+    const sessionData = this.getValidatedSession(sessionName);
+    
+    // Find MCP commands in buffer
+    const mcpCommands = sessionData.browserCommandBuffer.filter(cmd => cmd.source === 'claude');
+    
+    // Clear MCP commands from buffer
+    sessionData.browserCommandBuffer = sessionData.browserCommandBuffer.filter(
+      cmd => cmd.source !== 'claude'
+    );
+    
+    // Start nuclear fallback timeout
+    this.startNuclearTimeout(sessionData, 'mcp_cancellation');
+    
+    return {
+      success: true,
+      cancelledCommands: mcpCommands.map(cmd => cmd.command)
+    };
+  }
+
+  /**
+   * Create new SSH connection without adding to connections map (for nuclear fallback re-establishment)
+   */
+  private async createNewSSHConnection(config: SSHConnectionConfig): Promise<{
+    client: Client;
+    connection: SSHConnection;
+    config: SSHConnectionConfig;
+    shellChannel: ClientChannel;
+    isShellReady: boolean;
+  }> {
+    // Process authentication credentials with priority: privateKey > keyFilePath > password
+    let resolvedPrivateKey: string | undefined;
+    
+    if (config.privateKey) {
+      resolvedPrivateKey = config.privateKey;
+    } else if (config.keyFilePath !== undefined) {
+      try {
+        resolvedPrivateKey = await this.readPrivateKeyFromFile(config.keyFilePath, config.passphrase);
+      } catch (error) {
+        const sanitizedError = this.sanitizeKeyFileError(error as Error);
+        throw new Error(`Failed to read key file: ${sanitizedError}`);
+      }
+    }
+
+    const client = new Client();
+    
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        client.destroy();
+        reject(new Error("Nuclear fallback SSH re-establishment timeout after 10 seconds"));
+      }, 10000);
+
+      client.on("ready", () => {
+        clearTimeout(timeout);
+        
+        const connection: SSHConnection = {
+          name: config.name,
+          host: config.host,
+          username: config.username,
+          status: ConnectionStatus.CONNECTED,
+          lastActivity: new Date(),
+        };
+
+        // Create shell session
+        client.shell({ term: "xterm-256color" }, (err, stream) => {
+          if (err) {
+            client.destroy();
+            reject(new Error(`Shell creation failed: ${err.message}`));
+            return;
+          }
+
+          // Wait for initial prompt before considering shell ready
+          let initialOutput = '';
+          let promptTimeout: ReturnType<typeof setTimeout>;
+          
+          const onData = (data: Buffer): void => {
+            initialOutput += data.toString();
+            
+            // Look for shell prompt patterns using existing detection method
+            if (this.detectShellPrompt(initialOutput)) {
+              clearTimeout(promptTimeout);
+              stream.off('data', onData);
+              
+              console.log('✅ Shell prompt detected, connection ready for commands');
+              
+              // Shell is ready for commands
+              resolve({
+                client,
+                connection,
+                config,
+                shellChannel: stream,
+                isShellReady: true
+              });
+            }
+          };
+
+          // Set up timeout for prompt detection
+          promptTimeout = setTimeout(() => {
+            stream.off('data', onData);
+            console.log('⚠️ Shell prompt not detected within timeout, proceeding anyway');
+            
+            // Proceed even without detected prompt - shell should still work
+            resolve({
+              client,
+              connection,
+              config,
+              shellChannel: stream,
+              isShellReady: true
+            });
+          }, 3000); // 3 second timeout for prompt detection
+
+          stream.on('data', onData);
+        });
+      });
+
+      client.on("error", (error) => {
+        clearTimeout(timeout);
+        reject(new Error(`SSH connection failed: ${error.message}`));
+      });
+
+      // Connect with authentication using properly typed config
+      const connectConfig: SSHConnectConfig = {
+        host: config.host,
+        port: config.port || 22,
+        username: config.username,
+        keepaliveInterval: 30000,
+        keepaliveCountMax: 5,
+      };
+
+      if (resolvedPrivateKey) {
+        connectConfig.privateKey = resolvedPrivateKey;
+        connectConfig.passphrase = config.passphrase;
+      } else if (config.password) {
+        connectConfig.password = config.password;
+      } else {
+        reject(new Error("No authentication method provided"));
+        return;
+      }
+
+      client.connect(connectConfig);
+    });
+  }
+
+  /**
+   * Start nuclear fallback timeout for a session
+   */
+  private startNuclearTimeout(sessionData: SessionData, reason: 'browser_cancellation' | 'mcp_cancellation'): void {
+    // Clear any existing timeout
+    if (sessionData.nuclearFallback) {
+      clearTimeout(sessionData.nuclearFallback.timeoutHandle);
+    }
+
+    const duration = 30000; // 30 seconds
+    const startTime = Date.now();
+
+    const timeoutHandle = setTimeout(async () => {
+      await this.triggerNuclearFallback(sessionData);
+    }, duration);
+
+    sessionData.nuclearFallback = {
+      timeoutHandle,
+      startTime,
+      duration,
+      reason,
+      triggered: false
+    };
+  }
+
+  /**
+   * Trigger nuclear fallback - terminate and re-establish SSH session with timeout protection
+   */
+  private async triggerNuclearFallback(sessionData: SessionData): Promise<void> {
+    console.log('☢️ NUCLEAR FALLBACK TRIGGERED for session:', sessionData.connection.name);
+    
+    if (!sessionData.nuclearFallback) {
+      return;
+    }
+
+    // Mark as triggered
+    sessionData.nuclearFallback.triggered = true;
+    sessionData.nuclearFallback.lastFallbackReason = `Nuclear fallback triggered after ${sessionData.nuclearFallback.duration}ms timeout`;
+
+    // Story 02: Actual SSH session termination and re-establishment
+    console.log('🔥 TERMINATING SSH CONNECTION for session:', sessionData.connection.name);
+    
+    // Clear command buffers and state
+    sessionData.browserCommandBuffer = [];
+    
+    // Clear current command if any
+    if (sessionData.currentCommand) {
+      sessionData.currentCommand.reject(new Error('Command cancelled due to nuclear fallback'));
+      sessionData.currentCommand = undefined;
+    }
+
+    // Clear command queue
+    sessionData.commandQueue.forEach(queuedCmd => {
+      queuedCmd.reject(new Error('Command cancelled due to nuclear fallback'));
+    });
+    sessionData.commandQueue = [];
+    
+    sessionData.isCommandExecuting = false;
+
+    // Preserve essential configuration for re-establishment
+    const originalConfig = {
+      name: sessionData.connection.name,
+      host: sessionData.connection.host,
+      username: sessionData.connection.username,
+      keyFilePath: sessionData.config.keyFilePath,
+      port: sessionData.config.port || 22,
+      password: sessionData.config.password,
+      passphrase: sessionData.config.passphrase,
+      privateKey: sessionData.config.privateKey
+    };
+
+    // Force terminate existing SSH connection
+    try {
+      if (sessionData.shellChannel) {
+        sessionData.shellChannel.end();
+        sessionData.shellChannel = undefined;
+      }
+      sessionData.client.destroy();
+      sessionData.isShellReady = false;
+      sessionData.initialPromptShown = false;
+    } catch (error) {
+      console.log('⚠️ Error during SSH connection termination:', error);
+    }
+
+    // Re-establish SSH connection with original configuration and timeout protection
+    try {
+      console.log('🔄 RE-ESTABLISHING SSH CONNECTION for session:', originalConfig.name);
+      
+      // Add timeout protection for nuclear fallback re-establishment
+      const reestablishmentPromise = this.createNewSSHConnection(originalConfig);
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error('Nuclear fallback re-establishment timed out after 30 seconds'));
+        }, 30000);
+      });
+      
+      // Race between re-establishment and timeout
+      const newResult = await Promise.race([reestablishmentPromise, timeoutPromise]);
+      
+      // Update session data with new connection
+      sessionData.client = newResult.client;
+      sessionData.connection = newResult.connection;
+      sessionData.config = newResult.config;
+      sessionData.shellChannel = newResult.shellChannel;
+      sessionData.isShellReady = newResult.isShellReady;
+      sessionData.initialPromptShown = false;
+      
+      // Set up shell handlers for the re-established connection
+      this.setupShellHandlers(sessionData);
+      
+      // Reset connection state
+      sessionData.rawInputMode = false;
+      sessionData.echoDisabled = false;
+      sessionData.lastCommandSent = undefined;
+      sessionData.expectingCommandEcho = false;
+      
+      console.log('✅ SSH CONNECTION RE-ESTABLISHED for session:', originalConfig.name);
+      sessionData.nuclearFallback.lastFallbackReason = `Nuclear fallback completed - session re-established after ${sessionData.nuclearFallback.duration}ms timeout`;
+      
+    } catch (error) {
+      console.log('❌ SSH CONNECTION RE-ESTABLISHMENT FAILED for session:', originalConfig.name, error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      sessionData.nuclearFallback.lastFallbackReason = `Nuclear fallback failed - reestablishment failed: ${errorMessage}`;
+      
+      // Mark session as unhealthy
+      sessionData.isShellReady = false;
+      sessionData.shellChannel = undefined;
+    }
+  }
+
   cleanup(): void {
     for (const sessionData of this.connections.values()) {
       this.cleanupSession(sessionData);
@@ -901,7 +1288,18 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     if (sessionData.shellChannel) {
       sessionData.shellChannel.end();
     }
-    sessionData.client.destroy();
+    // CRITICAL FIX: Null check before destroying client to prevent crashes
+    if (sessionData.client) {
+      sessionData.client.destroy();
+    }
+    
+    // Clear nuclear fallback timeout if active
+    if (sessionData.nuclearFallback) {
+      clearTimeout(sessionData.nuclearFallback.timeoutHandle);
+    }
+    
+    // CRITICAL FIX: Clear browser command buffer to prevent memory leaks
+    sessionData.browserCommandBuffer = [];
   }
 
   getConnection(name: string): SSHConnection | undefined {
@@ -1119,6 +1517,18 @@ export class SSHConnectionManager implements ISSHConnectionManager {
 
     // Send the control character
     sessionData.shellChannel.write(controlChar);
+
+    // Story 01: Browser Command Cancellation - Clear browser command buffer on SIGINT (Ctrl-C)
+    // This allows MCP commands to proceed after user cancellation
+    if (signal.toUpperCase() === "SIGINT") {
+      // Clear only browser (user) commands, preserve MCP (claude) commands
+      sessionData.browserCommandBuffer = sessionData.browserCommandBuffer.filter(
+        cmd => cmd.source === 'claude'
+      );
+      
+      // Nuclear Fallback - Story 01: Start timeout on browser cancellation
+      this.startNuclearTimeout(sessionData, 'browser_cancellation');
+    }
 
     // Update last activity
     sessionData.connection.lastActivity = new Date();
@@ -1531,6 +1941,108 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     }
     
     return false;
+  }
+
+  // Server-Side Command Capture API Methods
+
+  /**
+   * Get browser command buffer for a session
+   * @param sessionName - Name of the SSH session
+   * @returns Array of captured browser commands
+   */
+  getBrowserCommandBuffer(sessionName: string): BrowserCommandEntry[] {
+    this.validateSessionName(sessionName);
+    const sessionData = this.connections.get(sessionName);
+    return sessionData ? [...sessionData.browserCommandBuffer] : [];
+  }
+
+  /**
+   * Clear browser command buffer for a session
+   * @param sessionName - Name of the SSH session
+   */
+  clearBrowserCommandBuffer(sessionName: string): void {
+    this.validateSessionName(sessionName);
+    const sessionData = this.connections.get(sessionName);
+    if (sessionData) {
+      sessionData.browserCommandBuffer.length = 0;
+    }
+  }
+
+  /**
+   * Add command to browser command buffer
+   * @param sessionName - Name of the SSH session
+   * @param command - Command string
+   * @param commandId - Unique command identifier
+   * @param source - Source of the command ('user' or 'claude')
+   */
+  addBrowserCommand(sessionName: string, command: string, commandId: string, source: 'user' | 'claude'): void {
+    this.validateSessionName(sessionName);
+    
+    // Validate command parameters
+    if (!command || typeof command !== 'string') {
+      throw new Error('Command must be a non-empty string');
+    }
+    
+    if (!commandId || typeof commandId !== 'string') {
+      throw new Error('Command ID must be a non-empty string');
+    }
+    
+    if (source !== 'user' && source !== 'claude') {
+      throw new Error('Source must be either "user" or "claude"');
+    }
+
+    const sessionData = this.connections.get(sessionName);
+    if (sessionData) {
+      const browserCommand: BrowserCommandEntry = {
+        command,
+        commandId,
+        timestamp: Date.now(),
+        source,
+        result: {
+          stdout: '',
+          stderr: '',
+          exitCode: -1  // -1 indicates command not yet completed
+        }
+      };
+      sessionData.browserCommandBuffer.push(browserCommand);
+      
+      // CRITICAL FIX: Implement circular buffer to prevent unbounded growth
+      if (sessionData.browserCommandBuffer.length > SSHConnectionManager.MAX_BROWSER_COMMAND_BUFFER_SIZE) {
+        sessionData.browserCommandBuffer.shift();
+      }
+    }
+  }
+
+  /**
+   * Update command result for browser command tracking
+   * @param sessionName - SSH session name
+   * @param commandId - Unique command identifier to update
+   * @param result - Command execution result
+   */
+  updateBrowserCommandResult(sessionName: string, commandId: string, result: CommandResult): void {
+    this.validateSessionName(sessionName);
+    
+    if (!commandId || typeof commandId !== 'string') {
+      throw new Error('Command ID must be a non-empty string');
+    }
+    
+    if (!result || typeof result !== 'object') {
+      throw new Error('Result must be a valid CommandResult object');
+    }
+
+    const sessionData = this.connections.get(sessionName);
+    if (sessionData) {
+      // Find the command entry to update
+      const commandEntry = sessionData.browserCommandBuffer.find(
+        cmd => cmd.commandId === commandId
+      );
+      
+      if (commandEntry) {
+        commandEntry.result = result;
+      } else {
+        console.warn(`Command ID ${commandId} not found in buffer for session ${sessionName}`);
+      }
+    }
   }
 
 }

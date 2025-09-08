@@ -70,7 +70,7 @@ describe('Terminal Display Fix Validation', () => {
     expect(doubleCarriageReturns).toBe(0); // Should be ZERO after fix
     
     console.log('\n=== OSC WINDOW TITLE SEQUENCE TEST ===');
-    const oscSequences = (rawMessages.match(/\u001b\]0;/g) || []).length;
+    const oscSequences = (rawMessages.match(new RegExp('\\u001b\\]0;', 'g')) || []).length;
     console.log(`OSC window title sequences found: ${oscSequences}`);
     expect(oscSequences).toBe(0); // Should be ZERO after fix
     

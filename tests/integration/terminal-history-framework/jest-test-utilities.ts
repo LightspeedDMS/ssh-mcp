@@ -85,8 +85,8 @@ export class WebSocketMessageAssertion {
    */
   toHavePrompts(): this {
     // Support both old format (user@host:path$) and new bracket format ([user@host project]$)
-    const oldFormatPattern = /[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+:[^\$]*\$/g;
-    const bracketFormatPattern = /\[[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+\s+[^\]]+\]\$/g;
+    const oldFormatPattern = /[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+:[^$]*$/g;
+    const bracketFormatPattern = /\[[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+\s+[^\]]+\]$/g;
     
     if (!oldFormatPattern.test(this.messages) && !bracketFormatPattern.test(this.messages)) {
       this.errors.push('Expected WebSocket messages to contain shell prompts (user@host:path$ or [user@host project]$) but none found');

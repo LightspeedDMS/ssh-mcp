@@ -176,7 +176,7 @@ export class FlexibleCommandConfiguration {
       args = JSON.parse(jsonPart);
     } catch (error) {
       // Re-throw the original error message to preserve error hierarchy
-      throw error;
+      throw new ConfigurationValidationError(`Invalid JSON in command: ${jsonPart}`);
     }
 
     // Ensure args is an object

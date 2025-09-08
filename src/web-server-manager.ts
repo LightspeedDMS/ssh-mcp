@@ -529,6 +529,9 @@ export class WebServerManager {
       const commandId = messageData.commandId as string;
       const command = messageData.command as string;
       
+      // COMMAND CAPTURE: Add command to browser command buffer before execution
+      this.sshManager.addBrowserCommand(sessionName, command, commandId, 'user');
+
       // Lock terminal for user command (AC5.1)
       this.lockTerminalForSession(sessionName, commandId, 'user');
       
@@ -546,12 +549,15 @@ export class WebServerManager {
       this.broadcastProcessingState(sessionName, 'executing', commandId);
 
       try {
-        // Execute command with user source
-        await this.sshManager.executeCommand(
+        // Execute command with user source and capture result
+        const commandResult = await this.sshManager.executeCommand(
           sessionName, 
           command,
           { source: 'user' }
         );
+
+        // Update browser command buffer with execution result
+        this.sshManager.updateBrowserCommandResult(sessionName, commandId, commandResult);
 
         // Output is already broadcast by SSH manager to WebSocket listeners
         // No need to send duplicate response here
@@ -574,6 +580,13 @@ export class WebServerManager {
       } catch (error) {
         // Handle command errors gracefully (AC5.5)
         const errorMessage = error instanceof Error ? error.message : String(error);
+        
+        // Update browser command buffer with error result
+        this.sshManager.updateBrowserCommandResult(sessionName, commandId, {
+          stdout: '',
+          stderr: errorMessage,
+          exitCode: 1  // Non-zero exit code indicates error
+        });
         
         // Send error response with source identification (AC5.5)
         const errorResponse = {
@@ -922,20 +935,35 @@ export class WebServerManager {
       return;
     }
 
+    // COMMAND CAPTURE: Add Claude command to browser command buffer
+    const claudeCommandId = `claude-cmd-${Date.now()}`;
+    this.sshManager.addBrowserCommand(sessionName, command, claudeCommandId, 'claude');
+
     // Send visual indicator for Claude Code execution (AC5.2)
     this.broadcastVisualIndicator(sessionName, 'claude_command_executing', 'claude', { command });
 
     try {
-      // Execute the command as Claude Code (does not lock terminal)
-      await this.sshManager.executeCommand(sessionName, command, { source: 'claude' });
+      // Execute the command as Claude Code (does not lock terminal) and capture result
+      const commandResult = await this.sshManager.executeCommand(sessionName, command, { source: 'claude' });
+      
+      // Update browser command buffer with execution result
+      this.sshManager.updateBrowserCommandResult(sessionName, claudeCommandId, commandResult);
       
       // Send visual indicator for completion
       this.broadcastVisualIndicator(sessionName, 'claude_command_completed', 'claude', { command });
     } catch (error) {
+      // Update browser command buffer with error result
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.sshManager.updateBrowserCommandResult(sessionName, claudeCommandId, {
+        stdout: '',
+        stderr: errorMessage,
+        exitCode: 1  // Non-zero exit code indicates error
+      });
+      
       // Send visual indicator for error
       this.broadcastVisualIndicator(sessionName, 'claude_command_error', 'claude', { 
         command, 
-        error: error instanceof Error ? error.message : String(error) 
+        error: errorMessage 
       });
     }
   }

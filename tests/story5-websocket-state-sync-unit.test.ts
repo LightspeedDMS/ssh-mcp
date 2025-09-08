@@ -25,7 +25,7 @@ class MockSSHConnectionManager extends SSHConnectionManager {
     this.mockSessions.add(name);
   }
 
-  async executeCommand(_sessionName: string, command: string, _options?: any): Promise<any> {
+  async executeCommand(_sessionName: string, command: string): Promise<any> {
     // Mock command execution
     return {
       stdout: `Mock output for: ${command}`,

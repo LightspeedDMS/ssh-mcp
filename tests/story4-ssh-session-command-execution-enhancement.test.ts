@@ -60,7 +60,7 @@ describe("Story 4: SSH Session Command Execution Enhancement", () => {
       // FAILING TEST: This should fail initially because we need to verify that
       // both user and Claude commands execute through the exact same shell channel
       
-      expect(async () => {
+      await expect(async () => {
         // Test setup - create a session (will fail without real SSH)
         // This test proves that both command sources would use identical execution path
         
@@ -86,7 +86,7 @@ describe("Story 4: SSH Session Command Execution Enhancement", () => {
       // FAILING TEST: Session state (directory, env vars) must persist identically
       // regardless of command source
       
-      expect(async () => {
+      await expect(async () => {
         // This test should verify that:
         // 1. Claude command changing directory persists for user commands
         // 2. User command setting env var persists for Claude commands
@@ -114,7 +114,7 @@ describe("Story 4: SSH Session Command Execution Enhancement", () => {
     test("should fail - identical output formatting between command sources", async () => {
       // FAILING TEST: Output format must be identical regardless of command source
       
-      expect(async () => {
+      await expect(async () => {
         const command = "echo 'test output'";
         
         try {
@@ -186,7 +186,7 @@ describe("Story 4: SSH Session Command Execution Enhancement", () => {
     test("should fail - command output streaming format must be identical for both sources", async () => {
       // FAILING TEST: WebSocket message format must be identical regardless of source
       
-      expect(async () => {
+      await expect(async () => {
         let claudeMessages: any[] = [];
         let userMessages: any[] = [];
         
@@ -222,7 +222,7 @@ describe("Story 4: SSH Session Command Execution Enhancement", () => {
     test("should fail - no command echo in streamed output for both sources", async () => {
       // FAILING TEST: Command echo should be suppressed consistently for both sources
       
-      expect(async () => {
+      await expect(async () => {
         const command = "echo 'no echo test'";
         
         try {
@@ -253,7 +253,7 @@ describe("Story 4: SSH Session Command Execution Enhancement", () => {
     test("should fail - directory changes must persist across command sources", async () => {
       // FAILING TEST: Directory changes by one source must affect the other source
       
-      expect(async () => {
+      await expect(async () => {
         try {
           // Claude changes directory
           await sshManager.executeCommand(mockSession.name, "cd /home", { source: 'claude' });
@@ -282,7 +282,7 @@ describe("Story 4: SSH Session Command Execution Enhancement", () => {
     test("should fail - environment variables must persist across command sources", async () => {
       // FAILING TEST: Environment variables set by one source must be visible to the other
       
-      expect(async () => {
+      await expect(async () => {
         try {
           // Claude sets environment variable
           await sshManager.executeCommand(mockSession.name, "export TEST_VAR=claude_value", { source: 'claude' });
@@ -311,7 +311,7 @@ describe("Story 4: SSH Session Command Execution Enhancement", () => {
     test("should fail - shell history must be shared between command sources", async () => {
       // FAILING TEST: Shell command history must be accessible to both sources
       
-      expect(async () => {
+      await expect(async () => {
         try {
           // Claude executes unique commands
           await sshManager.executeCommand(mockSession.name, "echo 'claude_command_1'", { source: 'claude' });
@@ -343,7 +343,7 @@ describe("Story 4: SSH Session Command Execution Enhancement", () => {
     test("should fail - command history must include source identification", async () => {
       // FAILING TEST: Command history must track both sources with proper identification
       
-      expect(async () => {
+      await expect(async () => {
         try {
           // Execute commands with different sources
           await sshManager.executeCommand(mockSession.name, "echo 'claude test'", { source: 'claude' });
@@ -383,7 +383,7 @@ describe("Story 4: SSH Session Command Execution Enhancement", () => {
     test("should fail - command history listeners must receive all commands regardless of source", async () => {
       // FAILING TEST: History listeners must be notified of commands from both sources
       
-      expect(async () => {
+      await expect(async () => {
         const receivedHistoryEntries: any[] = [];
         
         try {
@@ -420,7 +420,7 @@ describe("Story 4: SSH Session Command Execution Enhancement", () => {
     test("should fail - ANSI escape codes must be preserved for both command sources", async () => {
       // FAILING TEST: ANSI codes must be preserved identically regardless of source
       
-      expect(async () => {
+      await expect(async () => {
         const ansiCommand = "echo -e '\\x1b[31mRed text\\x1b[0m'"; // Red text ANSI
         
         try {
@@ -449,7 +449,7 @@ describe("Story 4: SSH Session Command Execution Enhancement", () => {
     test("should fail - cursor movement sequences must work identically for both sources", async () => {
       // FAILING TEST: VT100/xterm cursor sequences must be handled uniformly
       
-      expect(async () => {
+      await expect(async () => {
         const cursorCommand = "echo -e '\\x1b[2J\\x1b[H'"; // Clear screen + home cursor
         
         try {
@@ -479,7 +479,7 @@ describe("Story 4: SSH Session Command Execution Enhancement", () => {
     test("should fail - xterm.js compatibility flags must be set correctly for both sources", async () => {
       // FAILING TEST: Terminal output entries must have correct compatibility flags
       
-      expect(async () => {
+      await expect(async () => {
         // This test would need access to the TerminalOutputEntry structure
         // to verify that vt100Compatible and preserveFormatting flags are set correctly
         
@@ -526,7 +526,7 @@ describe("Story 4: SSH Session Command Execution Enhancement", () => {
       const receivedMessages: any[] = [];
       
       try {
-        expect(async () => {
+        await expect(async () => {
           // 1. Setup WebSocket monitoring
           const wsUrl = `ws://localhost:${testPort}/ws/session/${mockSession.name}`;
           webSocket = new WebSocket(wsUrl);
