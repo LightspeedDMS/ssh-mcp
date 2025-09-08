@@ -250,4 +250,6 @@ When encountering "⚠️ Message Error" in browser terminals:
 - **Static Assets**: `http://localhost:[DYNAMIC_PORT]/terminal-input-handler.js`
 
 **Port Discovery**: Only the MCP server knows the current port. Always query it first.
+
+**CRITICAL**: The `mcp__ssh__ssh_get_monitoring_url` function returns the CORRECT port. Server logs may show a different port than what actually serves HTTP requests. Always trust the MCP client URL response over server logs or netstat output.
 - every time you change anything related to conversation display, when you are done doing changes, you must run all Villenele tests, always, no exceptions.
