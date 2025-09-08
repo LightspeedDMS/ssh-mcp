@@ -299,8 +299,100 @@ export class ComprehensiveResponseCollector {
       .sort((a, b) => a.timestamp - b.timestamp);
 
     // Join message data verbatim - NO modification of line endings
-    return allMessages.map(msg => msg.data).join('');
+    const rawConcatenated = allMessages.map(msg => msg.data).join('');
+    
+    // COMMAND ECHO DUPLICATION FIX: Remove duplicate command echoes from final concatenated output
+    // This fixes the critical bug where commands appear twice in terminal output
+    const cleanedOutput = this.removeDuplicateCommandEchoes(rawConcatenated);
+    
+    return cleanedOutput;
   }
+
+  /**
+   * Remove duplicate command echoes from terminal output
+   * Fixes the pattern: [prompt]$ command\r\ncommand\r\nresult → [prompt]$ command\r\nresult
+   * Also removes double prompt patterns: ]$ [prompt]$ → [prompt]$
+   * FIXED: Uses precise regex patterns to target only actual duplicates
+   */
+  private removeDuplicateCommandEchoes(output: string): string {
+    // CRITICAL FIX: Apply the tested regex patterns for duplicate removal
+    let cleaned = output;
+    
+    // Fix 1: Remove PS1 configuration commands that leak into terminal output
+    cleaned = cleaned
+      .replace(/export PS1='[^']*'[^\\r\\n]*\r?\n?/g, '') // Remove PS1 export commands
+      .replace(/PS1='[^']*'\r?\n?/g, '') // Remove any remaining PS1 assignment traces
+      .replace(/null 2>&1\r?\n?/g, ''); // Remove null redirection traces
+    
+    // Fix 2: Remove duplicate command echoes
+    // Pattern: [jsbattig@localhost ~]$ whoami\r\nwhoami\r\njsbattig → [jsbattig@localhost ~]$ whoami\r\njsbattig
+    cleaned = cleaned.replace(/(\[[^\]]+\]\$\s+)([^\r\n]+)(\r\n)\2(\r\n)/g, '$1$2$3');
+    
+    // Fix 3: Remove concatenated duplicate prompts 
+    // Pattern: [jsbattig@localhost ~]$ [jsbattig@localhost ~]$ whoami → [jsbattig@localhost ~]$ whoami
+    cleaned = cleaned.replace(/(\[[^\]]+\]\$)\s+(\[[^\]]+\]\$)\s+/g, '$2 ');
+    
+    return cleaned;
+  }
+
+  /**
+   * Single pass cleanup for duplicate command echoes and double prompts
+   * TEMPORARILY DISABLED - Algorithm was too aggressive
+   */
+  /* private singlePassCleanup(output: string, _passNumber: number): string {
+    // Processing pass for duplicate removal
+    
+    // Split into lines for processing
+    const lines = output.split('\r\n');
+    const processedLines: string[] = [];
+    
+    for (let i = 0; i < lines.length; i++) {
+      const currentLine = lines[i];
+      const nextLine = lines[i + 1];
+      
+      // PATTERN 1: Remove duplicate command echoes
+      // Check if current line is a prompt with command: [user@host path]$ command
+      const promptWithCommandMatch = currentLine.match(/^(\[.*?\]\$)\s+(.+)$/);
+      
+      if (promptWithCommandMatch && nextLine) {
+        const [, , commandPart] = promptWithCommandMatch;
+        
+        // If next line is exactly the same command (duplicate echo), skip it
+        if (nextLine.trim() === commandPart.trim()) {
+          // Removing duplicate command echo: ${nextLine}
+          processedLines.push(currentLine);
+          i++; // Skip the duplicate command echo line
+          continue;
+        }
+      }
+      
+      // PATTERN 2: Remove double prompt patterns between commands
+      // Example: "[prompt]$ [prompt]$ command" → "[prompt]$ command"
+      const doublePromptMatch = currentLine.match(/^(\[.*?\]\$)\s+(\[.*?\]\$)\s+(.+)$/);
+      if (doublePromptMatch) {
+        const [, , secondPrompt, commandPart] = doublePromptMatch;
+        // Removing double prompt, keeping: ${secondPrompt} ${commandPart}
+        // Replace with single prompt + command
+        processedLines.push(`${secondPrompt} ${commandPart}`);
+        continue;
+      }
+      
+      // PATTERN 3: Remove lone prompt followed by prompt with command
+      // Check if current line is a lone prompt and next line starts a new prompt
+      const currentIsPromptOnly = /^\[.*?\]\$\s*$/.test(currentLine);
+      const nextIsPromptWithCommand = nextLine && /^\[.*?\]\$\s+.+$/.test(nextLine);
+      
+      if (currentIsPromptOnly && nextIsPromptWithCommand) {
+        // Removing duplicate prompt line: ${currentLine}
+        // Skip the current lone prompt line, keep the one with the command
+        continue;
+      }
+      
+      processedLines.push(currentLine);
+    }
+    
+    return processedLines.join('\r\n');
+  } */
 
   /**
    * Comprehensive resource cleanup

@@ -24,6 +24,7 @@ export interface TerminalMessage {
   type: 'terminal_output' | 'terminal_input' | 'error';
   sessionName?: string;
   data?: string;
+  command?: string;
   source?: string;
   commandId?: string;
   timestamp?: string;
@@ -238,7 +239,7 @@ export class TerminalInputHandler {
         const message: TerminalMessage = {
           type: 'terminal_input',
           sessionName: this.sessionName,
-          data: command + '\r',
+          command: command,
           commandId: commandId,
           timestamp: new Date().toISOString()
         };
@@ -332,6 +333,7 @@ export class TerminalInputHandler {
     const promptPatterns = [
       /^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+:[~\/][^$]*\$\s*$/, // user@host:path$ 
       /^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+:[~\/][^#]*#\s*$/, // user@host:path# (root)
+      /^\[[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\s+[^\]]+\]\$\s*$/, // [user@host project]$ (bracket format)
       /^\[\d{2}:\d{2}:\d{2}\][^$]*\$\s*$/,                // [HH:MM:SS]...$ (with timestamp)
       /^[>]\s*$/                                           // Simple > prompt (minimal)
     ];

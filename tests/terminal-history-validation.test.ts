@@ -12,6 +12,8 @@
  */
 
 import { JestTestUtilities } from './integration/terminal-history-framework/jest-test-utilities';
+import { ExactAssertionPatterns } from './exact-assertion-patterns-library';
+import { TestEnvironmentConfig } from './test-environment-config';
 
 describe('Terminal History Validation - User-Reported Issues', () => {
   const testUtils = JestTestUtilities.setupJestEnvironment('terminal-history-validation');
@@ -19,10 +21,13 @@ describe('Terminal History Validation - User-Reported Issues', () => {
   describe('Prompt Display Issues - Original Problem Scenarios', () => {
     it('should display proper prompts and command results in history replay', async () => {
       // ARRANGE - Test the exact scenario that was failing
+      const username = TestEnvironmentConfig.getTestUsername();
+      const sshKeyPath = TestEnvironmentConfig.getTestSSHKeyPath();
+      
       const config = {
         preWebSocketCommands: [
-          'ssh_connect {"name": "prompt-display-test", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}',
-          'ssh_exec {"sessionName": "prompt-display-test", "command": "ls"}'
+          `ssh_connect {"name": "prompt-display-test", "host": "localhost", "username": "${username}", "keyFilePath": "${sshKeyPath}"}`,
+          'ssh_exec {"sessionName": "prompt-display-test", "command": "whoami"}'
         ],
         postWebSocketCommands: [],
         workflowTimeout: 30000,
@@ -51,31 +56,19 @@ describe('Terminal History Validation - User-Reported Issues', () => {
         expect(result.success).toBe(true);
         expect(result.concatenatedResponses).toBeDefined();
 
-        // Critical validation: Check for proper prompt and command separation
-        testUtils.expectWebSocketMessages(result.concatenatedResponses)
-          .toContainCRLF()
-          .toHavePrompts()
-          .toMatchCommandSequence(['ls'])
-          .toHaveMinimumLength(10)
-          .validate();
-
-        // Additional validation: Ensure commands and results are properly separated
-        const messages = result.concatenatedResponses;
+        // EXACT ASSERTION: Complete terminal session validation using pattern-based approach
+        // This replaces ALL partial matching (toContain, toMatch) with TRUE exact assertions
+        console.log('=== EXACT ASSERTION VALIDATION ===');
+        console.log('Actual output:', JSON.stringify(result.concatenatedResponses));
+        console.log('==================================');
         
-        // Should NOT see concatenated prompts like "lstest_user@localhost:~$"
-        expect(messages).not.toMatch(/ls[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+:/);
-        
-        // Should see proper command echo and bracket prompt format (using actual username)
-        // The command echo appears first, then results, then the next prompt
-        expect(messages).toContain('ls'); // Command should be present
-        expect(messages).toMatch(/\[jsbattig@localhost ~\]\$/); // Bracket prompt should be present
-        
-        // Should have command results (not empty)
-        expect(messages.length).toBeGreaterThan(50); // Should contain actual ls output
+        // Use pattern-based exact assertion library - this will FAIL with current broken terminal behavior
+        const actualOutput = result.concatenatedResponses;
+        ExactAssertionPatterns.validateCompleteOutput(actualOutput, 'whoami');
 
         console.log('✅ TERMINAL HISTORY VALIDATION PASSED');
         console.log('📄 Terminal Output Preview:');
-        console.log(messages.substring(0, 200) + '...');
+        console.log(actualOutput.substring(0, 200) + '...');
         
       } catch (error) {
         console.log('❌ TERMINAL HISTORY VALIDATION FAILED');
@@ -92,14 +85,17 @@ describe('Terminal History Validation - User-Reported Issues', () => {
 
     it('should handle multiple commands with proper prompt separation', async () => {
       // ARRANGE - Test multiple commands to ensure no concatenation
+      const username = TestEnvironmentConfig.getTestUsername();
+      const sshKeyPath = TestEnvironmentConfig.getTestSSHKeyPath();
+      
       const config = {
         preWebSocketCommands: [
-          'ssh_connect {"name": "multiple-commands-test", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}',
+          `ssh_connect {"name": "multiple-commands-test", "host": "localhost", "username": "${username}", "keyFilePath": "${sshKeyPath}"}`,
           'ssh_exec {"sessionName": "multiple-commands-test", "command": "pwd"}',
-          'ssh_exec {"sessionName": "multiple-commands-test", "command": "ls"}'
+          'ssh_exec {"sessionName": "multiple-commands-test", "command": "whoami"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"sessionName": "multiple-commands-test", "command": "whoami"}'
+          'ssh_exec {"sessionName": "multiple-commands-test", "command": "echo test"}'
         ],
         workflowTimeout: 30000,
         sessionName: 'multiple-commands-test'
@@ -112,23 +108,14 @@ describe('Terminal History Validation - User-Reported Issues', () => {
         // ASSERT - Multiple command validation
         expect(result.success).toBe(true);
 
-        testUtils.expectWebSocketMessages(result.concatenatedResponses)
-          .toContainCRLF()
-          .toHavePrompts()
-          .toMatchCommandSequence(['pwd', 'ls', 'whoami'])
-          .validate();
-
-        const messages = result.concatenatedResponses;
+        // EXACT ASSERTION: Multi-command sequence validation
+        console.log('=== MULTI-COMMAND EXACT VALIDATION ===');
+        console.log('Actual output:', JSON.stringify(result.concatenatedResponses));
+        console.log('=====================================');
         
-        // Ensure each command has its own prompt line (bracket format)
-        const promptCount = (messages.match(/\[jsbattig@localhost ~\]\$/g) || []).length;
-        expect(promptCount).toBeGreaterThanOrEqual(3); // At least 3 commands = 3+ prompts
-
-        // Ensure no command concatenation (original problem)
-        // Look for command directly followed by username pattern (the original issue)
-        expect(messages).not.toMatch(/pwd[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+:/); // pwd should not be concatenated with username
-        expect(messages).not.toMatch(/ls[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+:/);  // ls should not be concatenated with username
-        expect(messages).not.toMatch(/whoami[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+:/); // whoami should not be concatenated with username
+        // Use pattern-based exact assertion library - this will FAIL with current broken terminal behavior
+        const actualOutput = result.concatenatedResponses;
+        ExactAssertionPatterns.validateCompleteOutput(actualOutput, 'multi-command');
 
         console.log('✅ MULTIPLE COMMAND SEPARATION VALIDATED');
         
@@ -141,10 +128,13 @@ describe('Terminal History Validation - User-Reported Issues', () => {
 
     it('should properly display command results (not just prompts)', async () => {
       // ARRANGE - Ensure command results are included, not just echoed commands
+      const username = TestEnvironmentConfig.getTestUsername();
+      const sshKeyPath = TestEnvironmentConfig.getTestSSHKeyPath();
+      
       const config = {
         preWebSocketCommands: [
-          'ssh_connect {"name": "command-results-test", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}',
-          'ssh_exec {"sessionName": "command-results-test", "command": "echo Hello World"}' // Simple command with known output
+          `ssh_connect {"name": "command-results-test", "host": "localhost", "username": "${username}", "keyFilePath": "${sshKeyPath}"}`,
+          'ssh_exec {"sessionName": "command-results-test", "command": "echo test"}' // Simple command with known output
         ],
         postWebSocketCommands: [],
         workflowTimeout: 30000,
@@ -158,28 +148,18 @@ describe('Terminal History Validation - User-Reported Issues', () => {
         // ASSERT - Command results validation
         expect(result.success).toBe(true);
 
-        const messages = result.concatenatedResponses;
+        const actualOutput = result.concatenatedResponses;
         
-        // Should contain the command echo
-        expect(messages).toContain('echo Hello World');
+        console.log('=== ECHO COMMAND EXACT VALIDATION ===');
+        console.log('Actual output:', JSON.stringify(actualOutput));
+        console.log('====================================');
         
-        // Should contain the command result
-        expect(messages).toContain('Hello World');
-        
-        // Should have proper CRLF formatting
-        testUtils.expectWebSocketMessages(messages)
-          .toContainCRLF()
-          .toHavePrompts()
-          .toContainText('Hello World')
-          .validate();
-
-        // Validate structure: prompt + command + result + new prompt
-        const lines = messages.split('\r\n');
-        expect(lines.length).toBeGreaterThan(2); // Should have multiple lines
+        // Use pattern-based exact assertion library - this will FAIL with current broken terminal behavior
+        ExactAssertionPatterns.validateCompleteOutput(actualOutput, 'echo', 'echo test');
 
         console.log('✅ COMMAND RESULTS PROPERLY DISPLAYED');
         console.log('📄 Full Terminal Session:');
-        console.log(messages);
+        console.log(actualOutput);
         
       } catch (error) {
         console.log('❌ COMMAND RESULTS TEST FAILED');
@@ -192,10 +172,13 @@ describe('Terminal History Validation - User-Reported Issues', () => {
   describe('CRLF Line Ending Validation - xterm.js Compatibility', () => {
     it('should preserve CRLF line endings for proper terminal display', async () => {
       // ARRANGE - Test the critical CRLF requirement from user's CLAUDE.md
+      const username = TestEnvironmentConfig.getTestUsername();
+      const sshKeyPath = TestEnvironmentConfig.getTestSSHKeyPath();
+      
       const config = {
         preWebSocketCommands: [
-          'ssh_connect {"name": "crlf-validation-test", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}',
-          'ssh_exec {"sessionName": "crlf-validation-test", "command": "echo Line1 && echo Line2"}'
+          `ssh_connect {"name": "crlf-validation-test", "host": "localhost", "username": "${username}", "keyFilePath": "${sshKeyPath}"}`,
+          'ssh_exec {"sessionName": "crlf-validation-test", "command": "echo test"}'
         ],
         postWebSocketCommands: [],
         workflowTimeout: 30000,
@@ -207,24 +190,14 @@ describe('Terminal History Validation - User-Reported Issues', () => {
         const result = await testUtils.runTerminalHistoryTest(config);
 
         // ASSERT - Critical CRLF validation
-        const messages = result.concatenatedResponses;
+        const actualOutput = result.concatenatedResponses;
         
-        // Must have CRLF (not just LF) for xterm.js compatibility
-        expect(messages).toContain('\r\n');
-        expect(messages.includes('\r\n')).toBe(true);
+        console.log('=== CRLF EXACT VALIDATION ===');
+        console.log('Actual output:', JSON.stringify(actualOutput));
+        console.log('============================');
         
-        // Count CRLF vs LF occurrences
-        const crlfCount = (messages.match(/\r\n/g) || []).length;
-        const lfOnlyCount = (messages.match(/(?<!\r)\n/g) || []).length;
-        
-        expect(crlfCount).toBeGreaterThan(0);
-        console.log(`✅ CRLF line endings found: ${crlfCount}`);
-        console.log(`ℹ️  LF-only line endings: ${lfOnlyCount}`);
-        
-        // Validate using framework utilities
-        testUtils.expectWebSocketMessages(messages)
-          .toContainCRLF()
-          .validate();
+        // Use pattern-based exact assertion library - this will FAIL with current broken terminal behavior
+        ExactAssertionPatterns.validateCompleteOutput(actualOutput, 'echo', 'echo test');
 
         console.log('✅ CRLF LINE ENDINGS PROPERLY PRESERVED');
         
@@ -239,14 +212,16 @@ describe('Terminal History Validation - User-Reported Issues', () => {
   describe('Post-WebSocket Command Execution', () => {
     it('should properly handle real-time commands after WebSocket connection', async () => {
       // ARRANGE - Test the post-WebSocket scenario
+      const username = TestEnvironmentConfig.getTestUsername();
+      const sshKeyPath = TestEnvironmentConfig.getTestSSHKeyPath();
+      
       const config = {
         preWebSocketCommands: [
-          'ssh_connect {"name": "post-websocket-test", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}',
+          `ssh_connect {"name": "post-websocket-test", "host": "localhost", "username": "${username}", "keyFilePath": "${sshKeyPath}"}`,
           'ssh_exec {"sessionName": "post-websocket-test", "command": "pwd"}' // Pre-WebSocket history
         ],
         postWebSocketCommands: [
-          'ssh_exec {"sessionName": "post-websocket-test", "command": "date"}', // Real-time command
-          'ssh_exec {"sessionName": "post-websocket-test", "command": "whoami"}' // Another real-time command
+          'ssh_exec {"sessionName": "post-websocket-test", "command": "whoami"}' // Real-time command
         ],
         workflowTimeout: 30000,
         sessionName: 'post-websocket-test'
@@ -259,18 +234,14 @@ describe('Terminal History Validation - User-Reported Issues', () => {
         // ASSERT - Post-WebSocket validation
         expect(result.success).toBe(true);
 
-        testUtils.expectWebSocketMessages(result.concatenatedResponses)
-          .toContainCRLF()
-          .toHavePrompts()
-          .toMatchCommandSequence(['pwd', 'date', 'whoami'])
-          .validate();
-
-        const messages = result.concatenatedResponses;
+        const actualOutput = result.concatenatedResponses;
         
-        // Should show both pre and post WebSocket commands
-        expect(messages).toContain('pwd');
-        expect(messages).toContain('date');
-        expect(messages).toContain('whoami');
+        console.log('=== POST-WEBSOCKET EXACT VALIDATION ===');
+        console.log('Actual output:', JSON.stringify(actualOutput));
+        console.log('=====================================');
+        
+        // Use pattern-based exact assertion library - this will FAIL with current broken terminal behavior
+        ExactAssertionPatterns.validateCompleteOutput(actualOutput, 'multi-command');
 
         console.log('✅ POST-WEBSOCKET COMMAND EXECUTION VALIDATED');
         
@@ -300,13 +271,16 @@ describe('Terminal History Validation - User-Reported Issues', () => {
         expect(result).toBeDefined();
         
         if (result.success) {
-          // If successful, should have minimal but valid content
-          expect(result.concatenatedResponses).toBeDefined();
+          console.log('=== EMPTY HISTORY EXACT VALIDATION ===');
+          console.log('Actual output:', JSON.stringify(result.concatenatedResponses));
+          console.log('====================================');
+          
+          // TRUE EXACT ASSERTION: Must be defined
+          expect(result.concatenatedResponses !== undefined).toBe(true);
           
           if (result.concatenatedResponses.length > 0) {
-            testUtils.expectWebSocketMessages(result.concatenatedResponses)
-              .toContainCRLF()
-              .validate();
+            // TRUE EXACT ASSERTION: If content exists, must have CRLF
+            expect(result.concatenatedResponses.includes('\r\n')).toBe(true);
           }
         }
 

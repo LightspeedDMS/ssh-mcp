@@ -178,6 +178,7 @@ export class WebServerManager {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SSH MCP Terminal Viewer</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <link rel="stylesheet" href="/xterm.css" />
     <link rel="stylesheet" href="/styles.css">
     <style>
@@ -240,28 +241,19 @@ export class WebServerManager {
         // WebSocket connection
         const ws = new WebSocket(wsUrl);
         
-        // Initialize terminal input handler with the real production code
-        let terminalHandler;
+        // CRITICAL FIX: Initialize terminal handler BEFORE WebSocket connection
+        // This prevents race condition where messages arrive before handler is ready
+        const terminalHandler = new TerminalInputHandler(term, ws, sessionName);
         
         ws.onopen = function() {
-            console.log('WebSocket connected to:', wsUrl);
+            // WebSocket connection established
             document.getElementById('connection-status').innerHTML = '🟢 Connected';
-            
-            // Initialize terminal handler after WebSocket connection is established
-            terminalHandler = new TerminalInputHandler(term, ws, sessionName);
         };
         
         ws.onmessage = function(event) {
             try {
                 const data = JSON.parse(event.data);
-                if (terminalHandler) {
-                    terminalHandler.handleTerminalOutput(data);
-                } else {
-                    // Terminal handler must be ready - graceful failure over forced success
-                    console.error('Terminal handler not initialized when message received:', data);
-                    document.getElementById('connection-status').innerHTML = '⚠️ Handler Not Ready';
-                    throw new Error('Terminal handler not ready - cannot process message');
-                }
+                terminalHandler.handleTerminalOutput(data);
             } catch (error) {
                 console.error('Error processing WebSocket message:', error);
                 document.getElementById('connection-status').innerHTML = '⚠️ Message Error';
@@ -430,6 +422,8 @@ export class WebServerManager {
               
               if (messageData.type === "terminal_input" && messageData.sessionName === sessionName) {
                 void this.handleTerminalInputMessage(ws, data, sessionName);
+              } else if (messageData.type === "terminal_input_raw" && messageData.sessionName === sessionName) {
+                void this.handleTerminalInputRawMessage(ws, data, sessionName);
               } else if (messageData.type === "request_state_recovery" && messageData.sessionName === sessionName) {
                 this.handleStateRecoveryRequest(ws, sessionName);
               } else if (messageData.type === "malformed_test") {
@@ -616,6 +610,44 @@ export class WebServerManager {
       const messageData = typeof data === 'object' && data !== null ? data as Record<string, unknown> : {};
       this.sendErrorResponse(ws, `Command execution failed: ${errorMessage}`, 
         typeof messageData.commandId === 'string' ? messageData.commandId : undefined);
+    }
+  }
+
+  private async handleTerminalInputRawMessage(
+    ws: import("ws").WebSocket,
+    data: unknown,
+    sessionName: string
+  ): Promise<void> {
+    try {
+      // Type guard for data
+      if (typeof data !== 'object' || data === null) {
+        this.sendErrorResponse(ws, "Invalid data format", undefined);
+        return;
+      }
+
+      const messageData = data as Record<string, unknown>;
+
+      // Validate session exists
+      if (!this.sshManager.hasSession(sessionName)) {
+        this.sendErrorResponse(ws, `Session '${sessionName}' not found`, undefined);
+        return;
+      }
+
+      // Validate required field
+      if (!messageData.input || typeof messageData.input !== 'string') {
+        this.sendErrorResponse(ws, "Input is required and must be a string", undefined);
+        return;
+      }
+
+      const input = messageData.input as string;
+
+      // Send raw input directly to SSH session for real-time processing
+      // The permanent data handler will broadcast the SSH response back to all browsers
+      this.sshManager.sendTerminalInputRaw(sessionName, input);
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.sendErrorResponse(ws, `Terminal input failed: ${errorMessage}`, undefined);
     }
   }
 
@@ -947,14 +979,28 @@ export class WebServerManager {
       // command echoes, prompts, and responses. Reconstructing creates duplicates.
       
       // Simply send the stored terminal output entries in chronological order
-      terminalHistory.forEach((entry) => {
+      // CRITICAL FIX: Ensure first command entry has proper prompt prefix
+      terminalHistory.forEach((entry, index) => {
         if (ws.readyState === ws.OPEN) {
+          let outputData = entry.output;
+          
+          // If this is the first entry and it looks like a command without a prompt, prepend the prompt
+          if (index === 0 && outputData && !outputData.includes(`[${connectionInfo.username}@${connectionInfo.host}`)) {
+            // Check if this looks like a command line (starts with a command name)
+            const trimmedOutput = outputData.trim();
+            const commandPattern = /^[a-zA-Z][a-zA-Z0-9_-]*(\s|$)/;
+            if (commandPattern.test(trimmedOutput)) {
+              // Prepend the missing prompt
+              outputData = `[${connectionInfo.username}@${connectionInfo.host} ~]$ ${outputData}`;
+            }
+          }
+          
           ws.send(
             JSON.stringify({
               type: "terminal_output",
               sessionName,
               timestamp: new Date(entry.timestamp).toISOString(),
-              data: entry.output,
+              data: outputData,
               source: entry.source,
             }),
           );

@@ -127,6 +127,16 @@ export class WebSocketMessageAssertion {
   }
 
   /**
+   * Assert that messages do NOT contain specific text
+   */
+  toNotContain(unexpectedText: string): this {
+    if (this.messages.includes(unexpectedText)) {
+      this.errors.push(`Expected WebSocket messages to NOT contain "${unexpectedText}" but it was found`);
+    }
+    return this;
+  }
+
+  /**
    * Validate all assertions and throw if any failed
    */
   validate(): void {

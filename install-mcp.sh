@@ -15,11 +15,47 @@ echo -e "${GREEN}SSH MCP Server Installation Script${NC}"
 echo "======================================"
 
 # Check if we're in the right directory
-if [ ! -f "package.json" ] || [ ! -f "dist/src/mcp-server.js" ]; then
+if [ ! -f "package.json" ]; then
     echo -e "${RED}Error: Must run this script from the ls-ssh-mcp project directory${NC}"
-    echo "Make sure you've built the project with 'npm run build'"
+    echo "Expected to find package.json in current directory"
     exit 1
 fi
+
+# Check for TypeScript source files
+if [ ! -f "src/mcp-server.ts" ]; then
+    echo -e "${RED}Error: TypeScript source files not found${NC}"
+    echo "Expected to find src/mcp-server.ts"
+    exit 1
+fi
+
+# Check if node_modules exists, install if needed
+if [ ! -d "node_modules" ]; then
+    echo -e "${YELLOW}Dependencies not found. Installing npm dependencies...${NC}"
+    if ! npm install; then
+        echo -e "${RED}Error: Failed to install dependencies${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✅ Dependencies installed${NC}"
+fi
+
+# Build the project (compile TypeScript to JavaScript)
+echo -e "${YELLOW}Building project (compiling TypeScript to JavaScript)...${NC}"
+echo "  • Compiling TypeScript files with tsc"
+echo "  • Copying static files to dist/"
+if ! npm run build; then
+    echo -e "${RED}Error: Failed to build project${NC}"
+    echo "Make sure TypeScript is properly installed and configured"
+    exit 1
+fi
+
+# Verify build output exists
+if [ ! -f "dist/src/mcp-server.js" ]; then
+    echo -e "${RED}Error: Build completed but dist/src/mcp-server.js not found${NC}"
+    echo "Build may have failed silently"
+    exit 1
+fi
+
+echo -e "${GREEN}✅ Project built successfully${NC}"
 
 # Remove existing SSH MCP server if it exists
 echo -e "${YELLOW}Removing existing SSH MCP server configuration...${NC}"
@@ -47,26 +83,18 @@ if [ -f ".ssh-mcp-server.port" ]; then
     rm -f .ssh-mcp-server.port
 fi
 
-# Start the server briefly to discover the port
+# Discover an available port using a simpler approach
 echo -e "${YELLOW}Discovering available port...${NC}"
 
-# Run the orchestrator briefly to discover the port (pure MCP server doesn't output port info)
-SERVER_OUTPUT=$(timeout 15s node dist/src/orchestrator.js 2>&1 | grep "MCP SSH Server started - MCP: stdio, Web:" || true)
-
-if [ -z "$SERVER_OUTPUT" ]; then
-    echo -e "${RED}Error: Failed to discover available port${NC}"
-    echo -e "${RED}Server output (if any):${NC}"
-    timeout 15s node dist/src/orchestrator.js 2>&1 | head -10 || true
-    exit 1
-fi
-
-# Extract the port number from the output
-DISCOVERED_PORT=$(echo "$SERVER_OUTPUT" | sed 's/.*Web: \([0-9]*\).*/\1/')
-
-if [ -z "$DISCOVERED_PORT" ] || ! [[ "$DISCOVERED_PORT" =~ ^[0-9]+$ ]]; then
-    echo -e "${RED}Error: Could not parse discovered port from: $SERVER_OUTPUT${NC}"
-    exit 1
-fi
+# Start with a preferred port and find an available one
+DISCOVERED_PORT=8080
+while netstat -ln 2>/dev/null | grep -q ":$DISCOVERED_PORT " || ss -ln 2>/dev/null | grep -q ":$DISCOVERED_PORT "; do
+    DISCOVERED_PORT=$((DISCOVERED_PORT + 1))
+    if [ $DISCOVERED_PORT -gt 8200 ]; then
+        echo -e "${RED}Error: Could not find available port in range 8080-8200${NC}"
+        exit 1
+    fi
+done
 
 echo -e "${GREEN}✅ Discovered available port: $DISCOVERED_PORT${NC}"
 
@@ -76,7 +104,15 @@ echo -e "${YELLOW}Installing SSH MCP server with port $DISCOVERED_PORT...${NC}"
 claude mcp add ssh node "$(pwd)/dist/src/mcp-server.js" -e WEB_PORT=$DISCOVERED_PORT
 
 if [ $? -eq 0 ]; then
-    echo -e "${GREEN}✅ SSH MCP server installed successfully!${NC}"
+    echo ""
+    echo -e "${GREEN}🎉 SSH MCP server installation completed successfully!${NC}"
+    echo ""
+    echo -e "${GREEN}What was completed:${NC}"
+    echo "  ✅ TypeScript source files compiled to JavaScript"
+    echo "  ✅ Static files (HTML, CSS, JS) copied to dist/"
+    echo "  ✅ MCP server registered with Claude Code"
+    echo "  ✅ Web terminal interface configured"
+    echo "  ✅ Dynamic port discovery and assignment"
     echo ""
     echo -e "${GREEN}Configuration:${NC}"
     echo "  • MCP Server: ssh"
@@ -90,7 +126,7 @@ if [ $? -eq 0 ]; then
     echo "3. Use ssh_get_monitoring_url tool to get the specific monitoring URL"
     echo "4. Verify installation with: claude mcp list"
     echo ""
-    echo -e "${GREEN}Installation complete!${NC}"
+    echo -e "${GREEN}Installation complete! 🚀${NC}"
 else
     echo -e "${RED}Error: Failed to install SSH MCP server${NC}"
     exit 1
