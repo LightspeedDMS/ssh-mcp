@@ -52,14 +52,14 @@ describe("Browser Connectivity Management - Unit Tests", () => {
 
     // Mock xterm.js Terminal
     (global as any).Terminal = class MockTerminal {
-      constructor(_options: any) {}
-      open(_element: any) {}
-      write(_data: string) {}
+      constructor() {}
+      open() {}
+      write() {}
       clear() {}
       scrollToBottom() {}
-      onData(_callback: (data: string) => void) {}
-      onKey(_callback: ({ key, domEvent }: any) => void) {}
-      onResize(_callback: ({ cols, rows }: any) => void) {}
+      onData() {}
+      onKey() {}
+      onResize() {}
     };
 
     // Mock WebSocket to prevent actual connections
@@ -75,7 +75,7 @@ describe("Browser Connectivity Management - Unit Tests", () => {
       onmessage: any = null;
       onerror: any = null;
 
-      constructor(url: string) {
+      constructor() {
         // Don't actually connect
         setTimeout(() => {
           if (this.onopen) {
@@ -85,7 +85,7 @@ describe("Browser Connectivity Management - Unit Tests", () => {
         }, 100);
       }
 
-      send(data: string) {}
+      send() {}
       close() {
         if (this.onclose) {
           this.readyState = MockWebSocket.CLOSED;
@@ -163,7 +163,7 @@ describe("Browser Connectivity Management - Unit Tests", () => {
       // Test different notification types
       const types = ["success", "error", "warning", "info"];
 
-      types.forEach((type, index) => {
+      types.forEach((type) => {
         const notification = document.createElement("div");
         notification.className = `notification notification-${type}`;
         notification.textContent = `Test ${type} notification`;

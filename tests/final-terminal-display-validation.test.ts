@@ -58,7 +58,7 @@ describe('Final Terminal Display Validation', () => {
       hasProperPrompts: /\[jsbattig@localhost[^\]]*\]\$/.test(result.concatenatedResponses),
       hasInlineCommands: /\[jsbattig@localhost[^\]]*\]\$\s+\w+/.test(result.concatenatedResponses),
       hasCRLF: result.concatenatedResponses.includes('\r\n'),
-      noProblematicSequences: !/\u001b\[\?2004l\r\u001b\[\?2004h/.test(result.concatenatedResponses),
+      noProblematicSequences: !new RegExp('\\u001b\\[\\?2004l\\r\\u001b\\[\\?2004h').test(result.concatenatedResponses),
       noCorruptedPrompts: !/^sbattig@localhost/.test(result.concatenatedResponses) // Missing [j at start of line
     };
     

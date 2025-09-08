@@ -186,7 +186,7 @@ describe('Terminal Display Bug Reproduction', () => {
       });
 
       // Check for bracket format prompt pattern
-      const promptPattern = /\[[\w-]+@[\w.-]+\s+[\w\/.-]+\]\$/;
+      const promptPattern = /\[[\w-]+@[\w.-]+\s+[\w/.-]+\]\$/;
       const initialPromptMessages = messages.filter(msg => promptPattern.test(msg.data));
 
       console.log('\n=== PROMPT DETECTION ===');
@@ -236,7 +236,7 @@ describe('Terminal Display Bug Reproduction', () => {
         })
         .filter(msg => msg && msg.type === 'terminal_output');
 
-      const promptPattern = /\[[\w-]+@[\w.-]+\s+[\w\/.-]+\]\$/;
+      const promptPattern = /\[[\w-]+@[\w.-]+\s+[\w/.-]+\]\$/;
       const promptMessages = messages.filter(msg => promptPattern.test(msg.data));
 
       console.log('\n=== TERMINAL HISTORY REPLAY ANALYSIS ===');

@@ -27,7 +27,7 @@ describe("SSH Key File Enhancement", () => {
   afterEach(() => {
     connectionManager.cleanup();
     if (mcpServer) {
-      mcpServer.stop();
+      void mcpServer.stop();
     }
     
     // Clean up test directory

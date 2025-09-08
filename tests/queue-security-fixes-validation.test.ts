@@ -63,7 +63,7 @@ describe("Queue Security Fixes Validation", () => {
       if (event === 'data') {
         dataCallback = callback;
         // Simulate initial prompt
-        setTimeout(() => {
+        void setTimeout(() => {
           if (dataCallback) {
             dataCallback(Buffer.from('user@localhost:~$ '));
           }
@@ -74,7 +74,7 @@ describe("Queue Security Fixes Validation", () => {
     // Mock command execution to simulate real output
     mockChannel.write = jest.fn((command: string) => {
       // Simulate command echoing back and result after short delay
-      setTimeout(() => {
+      void setTimeout(() => {
         if (dataCallback) {
           const commandText = command.replace('\n', '');
           // Echo the command and simulate output
@@ -307,7 +307,7 @@ describe("Queue Security Fixes Validation", () => {
       );
       
       // Wait a moment then disconnect
-      setTimeout(() => {
+      void setTimeout(() => {
         connectionManager.disconnectSession(mockConfig.name);
       }, 100);
       

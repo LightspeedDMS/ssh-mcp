@@ -8,6 +8,7 @@ export enum ConnectionStatus {
 export interface SSHConnectionConfig {
   name: string;
   host: string;
+  port?: number;
   username: string;
   password?: string;
   privateKey?: string;
@@ -102,3 +103,34 @@ export const QUEUE_CONSTANTS = {
   // Default timeout for queued commands if not specified
   DEFAULT_COMMAND_TIMEOUT_MS: 15000,
 } as const;
+
+// SSH Connection Config for internal SSH client
+export interface SSHConnectConfig {
+  host: string;
+  port?: number;
+  username: string;
+  password?: string;
+  privateKey?: string;
+  passphrase?: string;
+  keepaliveInterval?: number;
+  keepaliveCountMax?: number;
+}
+
+// Browser Command Entry for tracking browser-initiated commands with results
+export interface BrowserCommandEntry {
+  command: string;
+  commandId: string;
+  timestamp: number;
+  source: 'user' | 'claude';
+  result: CommandResult;
+}
+
+// MCP Command Interception - Browser Command Gating Error
+export interface CommandGatingError {
+  success: false;
+  error: 'BROWSER_COMMANDS_EXECUTED';
+  message: string;
+  browserCommands: BrowserCommandEntry[];
+  retryAllowed: true;
+}
+

@@ -218,11 +218,11 @@ describe('Terminal Display Diagnosis with Villenele Framework', () => {
         
         // Look for common ANSI escape sequences
         const ansiPatterns = {
-          'Cursor Movement': /\x1b\[[0-9;]*[HfABCD]/g,
-          'Clear Screen/Line': /\x1b\[[0-9;]*[JK]/g,
-          'Color Codes': /\x1b\[[0-9;]*m/g,
-          'Save/Restore Cursor': /\x1b\[[su]/g,
-          'Set Mode': /\x1b\[[?][0-9;]*[hl]/g
+          'Cursor Movement': new RegExp('\u001b\[[0-9;]*[HfABCD]', 'g'),
+          'Clear Screen/Line': new RegExp('\u001b\[[0-9;]*[JK]', 'g'),
+          'Color Codes': new RegExp('\u001b\[[0-9;]*m', 'g'),
+          'Save/Restore Cursor': new RegExp('\u001b\[[su]', 'g'),
+          'Set Mode': new RegExp('\u001b\[[?][0-9;]*[hl]', 'g')
         };
         
         Object.entries(ansiPatterns).forEach(([name, pattern]) => {

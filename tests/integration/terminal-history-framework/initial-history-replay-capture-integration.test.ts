@@ -60,7 +60,7 @@ class TestMCPClient extends MCPClient {
     return true;
   }
 
-  public async callTool(name: string, _args: any): Promise<any> {
+  public async callTool(name: string): Promise<any> {
     // Simple implementation for testing
     if (name === 'ssh_connection_discovery') {
       return { success: true, result: { connections: [] } };

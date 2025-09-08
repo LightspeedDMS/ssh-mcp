@@ -225,8 +225,8 @@ describe("Critical Double Command Echo Fix", () => {
   test("Terminal output pattern validation", () => {
     // Define regex patterns for proper terminal format
     // Updated to handle ~ and other special characters in directory path
-    const promptPattern = /^\[[\w\-]+@[\w\-]+ [^\]]+\]\$ $/;
-    const commandEchoPattern = /^\[[\w\-]+@[\w\-]+ [^\]]+\]\$ .+\r\n$/;
+    const promptPattern = /^\[[\w-]+@[\w-]+ [^\]]+\]\$ $/
+    const commandEchoPattern = /^\[[\w-]+@[\w-]+ [^\]]+\]\$ .+\r\n$/
     const outputPattern = /^.+\r\n$/;
 
     // Test pattern matching
@@ -236,7 +236,7 @@ describe("Critical Double Command Echo Fix", () => {
 
     // Anti-patterns that should NOT match (these indicate bugs)
     // Updated to handle ~ and other special characters in directory path
-    const doublePromptPattern = /\[[\w\-]+@[\w\-]+ [^\]]+\]\$ \[[\w\-]+@[\w\-]+ [^\]]+\]\$/;
+    const doublePromptPattern = /\[[\w-]+@[\w-]+ [^\]]+\]\$ \[[\w-]+@[\w-]+ [^\]]+\]\$/
     const concatenationPattern = /echo "[\w\s]+"[\w\s]+$/; // command+output concatenated
 
     expect("[testuser@localhost ~]$ [testuser@localhost ~]$ echo").toMatch(doublePromptPattern);
