@@ -35,8 +35,8 @@ describe('Terminal Echo Duplication Fix - TDD Implementation', () => {
         'ssh_connect {"name": "echo-test-single", "host": "localhost", "username": "jsbattig", "keyFilePath": "/home/jsbattig/.ssh/id_ed25519"}',
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "echo-test-single", "command": "whoami"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "echo-test-single", "command": "whoami"}'}
+        ],
       workflowTimeout: 15000,
       sessionName: 'echo-test-single'
     };
@@ -70,9 +70,9 @@ describe('Terminal Echo Duplication Fix - TDD Implementation', () => {
         'ssh_connect {"name": "echo-test-multi", "host": "localhost", "username": "jsbattig", "keyFilePath": "/home/jsbattig/.ssh/id_ed25519"}',
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "echo-test-multi", "command": "whoami"}',
-        'ssh_exec {"sessionName": "echo-test-multi", "command": "pwd"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "echo-test-multi", "command": "whoami"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "echo-test-multi", "command": "pwd"}'}
+        ],
       workflowTimeout: 20000,
       sessionName: 'echo-test-multi'
     };
@@ -108,8 +108,8 @@ describe('Terminal Echo Duplication Fix - TDD Implementation', () => {
         'ssh_connect {"name": "echo-test-results", "host": "localhost", "username": "jsbattig", "keyFilePath": "/home/jsbattig/.ssh/id_ed25519"}',
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "echo-test-results", "command": "echo test-result-preservation"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "echo-test-results", "command": "echo test-result-preservation"}'}
+        ],
       workflowTimeout: 15000,
       sessionName: 'echo-test-results'
     };
@@ -173,9 +173,9 @@ describe('Terminal Echo Duplication Fix - TDD Implementation', () => {
         'ssh_exec {"sessionName": "echo-test-complex", "command": "pwd"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "echo-test-complex", "command": "whoami"}',
-        'ssh_exec {"sessionName": "echo-test-complex", "command": "echo complex-test"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "echo-test-complex", "command": "whoami"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "echo-test-complex", "command": "echo complex-test"}'}
+        ],
       workflowTimeout: 25000,
       sessionName: 'echo-test-complex'
     };

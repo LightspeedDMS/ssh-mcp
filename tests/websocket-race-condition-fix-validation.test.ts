@@ -29,8 +29,8 @@ describe('WebSocket Race Condition Fix Validation', () => {
         'ssh_exec {"sessionName": "race-test-session", "command": "echo \\"Immediate output test\\""}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "race-test-session", "command": "date"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "race-test-session", "command": "date"}'}
+        ],
       workflowTimeout: 15000,
       sessionName: 'race-test-session'
     };
@@ -64,9 +64,9 @@ describe('WebSocket Race Condition Fix Validation', () => {
         'ssh_exec {"sessionName": "rapid-test", "command": "echo \\"Command 3\\""}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "rapid-test", "command": "echo \\"Real-time 1\\""}',
-        'ssh_exec {"sessionName": "rapid-test", "command": "echo \\"Real-time 2\\""}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "rapid-test", "command": "echo \\"Real-time 1\\""}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "rapid-test", "command": "echo \\"Real-time 2\\""}'}
+        ],
       workflowTimeout: 20000,
       sessionName: 'rapid-test'
     };

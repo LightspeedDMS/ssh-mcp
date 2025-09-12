@@ -84,7 +84,7 @@ describe('FlexibleCommandConfiguration', () => {
           'ssh_connect {"host": "localhost", "username": "test_user"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"command": "whoami"}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"command": "whoami"}'}
         ],
         workflowTimeout: 30000,
         sessionName: 'test-session'
@@ -114,7 +114,7 @@ describe('FlexibleCommandConfiguration', () => {
       const invalidConfig = {
         preWebSocketCommands: [],
         postWebSocketCommands: [
-          'ssh_exec {malformed: json'
+          {initiator: 'mcp-client', command: 'ssh_exec {malformed: json'}
         ]
       };
 
@@ -142,7 +142,7 @@ describe('FlexibleCommandConfiguration', () => {
       const invalidConfig = {
         preWebSocketCommands: [],
         postWebSocketCommands: [
-          'ssh_exec'
+          {initiator: 'mcp-client', command: 'ssh_exec'}
         ]
       };
 
@@ -159,8 +159,8 @@ describe('FlexibleCommandConfiguration', () => {
           'ssh_exec {"command": "pwd"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"command": "whoami"}',
-          'ssh_disconnect {}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"command": "whoami"}'},
+          {initiator: 'mcp-client', command: 'ssh_disconnect {}'}
         ]
       };
 
@@ -174,7 +174,7 @@ describe('FlexibleCommandConfiguration', () => {
           'ssh_disconnect {}'
         ],
         postWebSocketCommands: [
-          'ssh_status {}'
+          {initiator: 'mcp-client', command: 'ssh_status {}'}
         ]
       };
 
@@ -237,8 +237,8 @@ describe('FlexibleCommandConfiguration', () => {
       const config = new FlexibleCommandConfiguration({
         preWebSocketCommands: [],
         postWebSocketCommands: [
-          'ssh_exec {"command": "whoami"}',
-          'ssh_disconnect {}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"command": "whoami"}'},
+          {initiator: 'mcp-client', command: 'ssh_disconnect {}'}
         ]
       });
 
@@ -279,7 +279,7 @@ describe('FlexibleCommandConfiguration', () => {
           'ssh_connect {"host": "localhost", "username": "test_user"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"command": "whoami"}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"command": "whoami"}'}
         ],
         workflowTimeout: 20000,
         sessionName: 'integration-test'
@@ -311,11 +311,11 @@ describe('FlexibleCommandConfiguration', () => {
           'ssh_exec {"command": "ls -la"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"command": "whoami"}',
-          'ssh_disconnect {}',
-          'ssh_switch_session {"sessionName": "session1"}',
-          'ssh_exec {"command": "date"}',
-          'ssh_disconnect {}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"command": "whoami"}'},
+          {initiator: 'mcp-client', command: 'ssh_disconnect {}'},
+          {initiator: 'mcp-client', command: 'ssh_switch_session {"sessionName": "session1"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"command": "date"}'},
+          {initiator: 'mcp-client', command: 'ssh_disconnect {}'}
         ],
         workflowTimeout: 45000,
         sessionName: 'multi-session-test'

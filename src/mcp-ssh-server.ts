@@ -382,10 +382,10 @@ export class MCPSSHServer {
     }
 
     // Check for browser command buffer content before execution
-    const browserCommandBuffer = this.sshManager.getBrowserCommandBuffer(sessionName);
-    if (browserCommandBuffer.length > 0) {
+    const userBrowserCommands = this.sshManager.getUserBrowserCommands(sessionName);
+    if (userBrowserCommands.length > 0) {
       // Return complete browser commands with results for informed decision-making
-      const browserCommands = browserCommandBuffer;
+      const browserCommands = userBrowserCommands;
       
       // Create CommandGatingError response
       const errorResponse = {
@@ -410,30 +410,53 @@ export class MCPSSHServer {
     }
 
     // Normal execution when buffer is empty
-    const result = await this.sshManager.executeCommand(sessionName, command, {
-      timeout,
-      source: 'claude',
-    });
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              success: true,
-              result: {
-                stdout: result.stdout,
-                stderr: result.stderr,
-                exitCode: result.exitCode,
+    
+    // EMERGENCY: CommandStateManager disabled - was destroying terminal output
+    // this.sshManager.trackCommandSubmission(sessionName, command);
+    
+    // CRITICAL FIX: Add MCP command to browser command buffer for cancellation tracking
+    const mcpCommandId = `mcp-cmd-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    this.sshManager.addBrowserCommand(sessionName, command, mcpCommandId, 'claude');
+    
+    try {
+      const result = await this.sshManager.executeCommand(sessionName, command, {
+        timeout,
+        source: 'claude',
+      });
+      
+      // Update browser command buffer with execution result
+      this.sshManager.updateBrowserCommandResult(sessionName, mcpCommandId, result);
+      
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                success: true,
+                result: {
+                  stdout: result.stdout,
+                  stderr: result.stderr,
+                  exitCode: result.exitCode,
+                },
               },
-            },
-            null,
-            2,
-          ),
-        },
-      ],
-    };
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    } catch (error) {
+      // Update browser command buffer with error result
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.sshManager.updateBrowserCommandResult(sessionName, mcpCommandId, {
+        stdout: '',
+        stderr: errorMessage,
+        exitCode: 1  // Non-zero exit code indicates error
+      });
+      
+      throw error;  // Re-throw to maintain existing error handling behavior
+    }
   }
 
   private async handleSSHListSessions(): Promise<{
@@ -587,6 +610,14 @@ export class MCPSSHServer {
       };
     }
 
+    // CRITICAL FIX: Send SIGINT signal to actually cancel the running SSH command
+    try {
+      this.sshManager.sendTerminalSignal(sessionName, 'SIGINT');
+    } catch (error) {
+      // Log warning but continue with buffer cleanup
+      console.warn(`Warning: Failed to send SIGINT signal: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    
     // Cancel MCP commands by clearing only MCP (claude) commands from buffer
     // This is similar to browser cancellation but only affects MCP commands
     const updatedBuffer = browserCommandBuffer.filter(cmd => cmd.source !== 'claude');

@@ -21,9 +21,9 @@ describe('Double Prompt Bug Reproduction', () => {
         'ssh_connect {"name": "fixed-test", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "fixed-test", "command": "whoami"}',
-        'ssh_exec {"sessionName": "fixed-test", "command": "pwd"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "fixed-test", "command": "whoami"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "fixed-test", "command": "pwd"}'}
+        ],
       workflowTimeout: 30000,
       sessionName: 'fixed-test'
     };
@@ -68,8 +68,8 @@ describe('Double Prompt Bug Reproduction', () => {
         'ssh_connect {"name": "pattern-analysis", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "pattern-analysis", "command": "echo test"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "pattern-analysis", "command": "echo test"}'}
+        ],
       workflowTimeout: 30000,
       sessionName: 'pattern-analysis'
     };
@@ -106,9 +106,9 @@ describe('Double Prompt Bug Reproduction', () => {
         'ssh_connect {"name": "clean-test", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "clean-test", "command": "whoami"}',
-        'ssh_exec {"sessionName": "clean-test", "command": "pwd"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "clean-test", "command": "whoami"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "clean-test", "command": "pwd"}'}
+        ],
       workflowTimeout: 30000,
       sessionName: 'clean-test'
     };

@@ -44,9 +44,9 @@ describe('Terminal Display Fix Validation', () => {
         'ssh_exec {"sessionName": "fix-validation", "command": "pwd"}',
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "fix-validation", "command": "whoami"}',
-        'ssh_exec {"sessionName": "fix-validation", "command": "date"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "fix-validation", "command": "whoami"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "fix-validation", "command": "date"}'}
+        ],
       workflowTimeout: 40000,
       sessionName: 'fix-validation'
     };

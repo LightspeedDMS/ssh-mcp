@@ -32,10 +32,10 @@ describe('Final Terminal Display Validation', () => {
         'ssh_exec {"sessionName": "final-validation-session", "command": "echo \\"Terminal display fix test\\""}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "final-validation-session", "command": "pwd"}',
-        'ssh_exec {"sessionName": "final-validation-session", "command": "whoami"}',
-        'ssh_exec {"sessionName": "final-validation-session", "command": "date"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "final-validation-session", "command": "pwd"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "final-validation-session", "command": "whoami"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "final-validation-session", "command": "date"}'}
+        ],
       workflowTimeout: 30000,
       sessionName: 'final-validation-session'
     };

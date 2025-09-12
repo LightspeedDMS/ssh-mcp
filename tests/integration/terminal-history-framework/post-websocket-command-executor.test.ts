@@ -212,12 +212,14 @@ describe('PostWebSocketCommandExecutor - Unit Tests', () => {
         {
           timestamp: Date.now(),
           data: 'user1\\r\\n',
+          type: 'websocket_received',
           isHistoryReplay: false,
           sequenceNumber: 1
         },
         {
           timestamp: Date.now() + 100,
           data: 'prompt> ',
+          type: 'websocket_received',
           isHistoryReplay: false,
           sequenceNumber: 2
         }
@@ -241,10 +243,10 @@ describe('PostWebSocketCommandExecutor - Unit Tests', () => {
 
     test('should handle mixed history and real-time messages', async () => {
       const historyMessages: CapturedMessage[] = [
-        { timestamp: Date.now() - 1000, data: 'old data', isHistoryReplay: true, sequenceNumber: 1 }
+        { timestamp: Date.now() - 1000, data: 'old data', type: 'history_replay', isHistoryReplay: true, sequenceNumber: 1 }
       ];
       const realTimeMessages: CapturedMessage[] = [
-        { timestamp: Date.now(), data: 'new data', isHistoryReplay: false, sequenceNumber: 2 }
+        { timestamp: Date.now(), data: 'new data', type: 'websocket_received', isHistoryReplay: false, sequenceNumber: 2 }
       ];
 
       let messageCallCount = 0;

@@ -38,7 +38,7 @@ describe('Terminal Display Bug Reproduction', () => {
           'ssh_exec {"sessionName": "test-fixed-terminal", "command": "echo hello"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"sessionName": "test-fixed-terminal", "command": "ls"}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "test-fixed-terminal", "command": "ls"}'}
         ],
         workflowTimeout: 30000,
         sessionName: 'test-fixed-terminal'
@@ -92,7 +92,7 @@ describe('Terminal Display Bug Reproduction', () => {
           'ssh_connect {"name": "test-echo-source", "host": "localhost", "username": "jsbattig", "keyFilePath": "/home/jsbattig/.ssh/id_ed25519"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"sessionName": "test-echo-source", "command": "whoami"}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "test-echo-source", "command": "whoami"}'}
         ],
         workflowTimeout: 30000,
         sessionName: 'test-echo-source'
@@ -272,8 +272,8 @@ describe('Terminal Display Bug Reproduction', () => {
           'ssh_connect {"name": "test-combined-analysis", "host": "localhost", "username": "jsbattig", "keyFilePath": "/home/jsbattig/.ssh/id_ed25519"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"sessionName": "test-combined-analysis", "command": "echo test"}',
-          'ssh_exec {"sessionName": "test-combined-analysis", "command": "pwd"}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "test-combined-analysis", "command": "echo test"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "test-combined-analysis", "command": "pwd"}'}
         ],
         workflowTimeout: 30000,
         sessionName: 'test-combined-analysis'

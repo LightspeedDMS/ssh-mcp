@@ -25,6 +25,8 @@ import { PreWebSocketCommandExecutor } from './pre-websocket-command-executor';
 import { WebSocketConnectionDiscovery } from './websocket-connection-discovery';
 import { InitialHistoryReplayCapture } from './initial-history-replay-capture';
 import { PostWebSocketCommandExecutor } from './post-websocket-command-executor';
+import { DynamicExpectedValueConstructor } from './dynamic-expected-value-constructor';
+import './jest-matchers'; // Load custom dynamic matchers
 
 /**
  * Configuration for Jest test utilities
@@ -34,6 +36,12 @@ export interface JestTestUtilitiesConfig {
   enableErrorDiagnostics?: boolean;
   testTimeout?: number;
   cleanupTimeout?: number;
+  enableDynamicValueConstruction?: boolean;  // Story 06: Enable dynamic expected value construction
+  dynamicValueConfig?: {                     // Configuration for dynamic value construction
+    customVariables?: Record<string, string>;
+    fallbackValues?: Record<string, string>;
+    cacheTimeoutMs?: number;
+  };
 }
 
 /**
@@ -85,8 +93,8 @@ export class WebSocketMessageAssertion {
    */
   toHavePrompts(): this {
     // Support both old format (user@host:path$) and new bracket format ([user@host project]$)
-    const oldFormatPattern = /[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+:[^$]*$/g;
-    const bracketFormatPattern = /\[[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+\s+[^\]]+\]$/g;
+    const oldFormatPattern = /[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+:[^$]*\$/g;
+    const bracketFormatPattern = /\[[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+\s+[^\]]+\]\$/g;
     
     if (!oldFormatPattern.test(this.messages) && !bracketFormatPattern.test(this.messages)) {
       this.errors.push('Expected WebSocket messages to contain shell prompts (user@host:path$ or [user@host project]$) but none found');
@@ -137,6 +145,69 @@ export class WebSocketMessageAssertion {
   }
 
   /**
+   * Assert that messages match dynamic template (Story 06 integration)
+   * Supports environment variables and dynamic value construction
+   */
+  toMatchDynamicTemplate(template: string, constructor?: DynamicExpectedValueConstructor): this {
+    try {
+      // This is async, but we can't make this method async due to chaining
+      // For now, document that this is a synchronous approximation
+      // Full async support should use expect().toMatchDynamicTemplate() directly
+      
+      // Perform basic template variable detection
+      if (template.includes('${')) {
+        this.errors.push(`Dynamic template "${template}" detected. Use async expect().toMatchDynamicTemplate() for full support.`);
+      } else {
+        // Simple string matching for non-dynamic templates
+        if (!this.messages.includes(template)) {
+          this.errors.push(`Expected WebSocket messages to match template "${template}" but not found`);
+        }
+      }
+      
+      // Note: constructor parameter is reserved for future async implementation
+      if (constructor) {
+        // Using constructor parameter to avoid unused variable warning
+      }
+    } catch (error) {
+      this.errors.push(`Dynamic template matching failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return this;
+  }
+
+  /**
+   * Assert that messages match dynamic pattern with regex support (Story 06 integration)
+   */
+  toMatchDynamicPattern(pattern: string): this {
+    try {
+      // Handle regex patterns
+      if (pattern.startsWith('${pattern:') && pattern.endsWith('}')) {
+        const regexMatch = pattern.match(/\$\{pattern:(.+)\}/);
+        if (regexMatch) {
+          const regexStr = regexMatch[1];
+          // Extract regex and flags
+          const regexParts = regexStr.match(/^\/(.+)\/([gimuy]*)$/);
+          if (regexParts) {
+            const regex = new RegExp(regexParts[1], regexParts[2]);
+            if (!regex.test(this.messages)) {
+              this.errors.push(`Expected WebSocket messages to match pattern ${pattern} but pattern not found`);
+            }
+          } else {
+            this.errors.push(`Invalid regex pattern syntax in ${pattern}`);
+          }
+        }
+      } else {
+        // Simple pattern matching for non-regex patterns
+        if (!this.messages.includes(pattern)) {
+          this.errors.push(`Expected WebSocket messages to match pattern "${pattern}" but not found`);
+        }
+      }
+    } catch (error) {
+      this.errors.push(`Dynamic pattern matching failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return this;
+  }
+
+  /**
    * Validate all assertions and throw if any failed
    */
   validate(): void {
@@ -155,14 +226,22 @@ export class JestTestUtilities {
   private commandConfig?: FlexibleCommandConfiguration;
   private currentTestName?: string;
   private testStartTime?: number;
+  private dynamicValueConstructor?: DynamicExpectedValueConstructor;  // Story 06: Dynamic value constructor
 
   constructor(config: JestTestUtilitiesConfig = {}) {
     this.config = {
       enableDetailedLogging: config.enableDetailedLogging ?? false,
       enableErrorDiagnostics: config.enableErrorDiagnostics ?? true,
       testTimeout: config.testTimeout ?? 30000,
-      cleanupTimeout: config.cleanupTimeout ?? 5000
+      cleanupTimeout: config.cleanupTimeout ?? 5000,
+      enableDynamicValueConstruction: config.enableDynamicValueConstruction ?? true,
+      dynamicValueConfig: config.dynamicValueConfig ?? {}
     };
+
+    // Initialize dynamic value constructor if enabled (Story 06)
+    if (this.config.enableDynamicValueConstruction) {
+      this.dynamicValueConstructor = new DynamicExpectedValueConstructor(this.config.dynamicValueConfig);
+    }
   }
 
   /**
@@ -292,6 +371,81 @@ export class JestTestUtilities {
     }
 
     return result;
+  }
+
+  /**
+   * Get dynamic value constructor instance (Story 06)
+   * @returns DynamicExpectedValueConstructor instance if enabled, undefined otherwise
+   */
+  getDynamicValueConstructor(): DynamicExpectedValueConstructor | undefined {
+    return this.dynamicValueConstructor;
+  }
+
+  /**
+   * Resolve dynamic template to actual values (Story 06)
+   * @param template Template string with variable placeholders like ${USER}, ${PWD}
+   * @returns Resolved template string with actual environment values
+   */
+  async resolveDynamicTemplate(template: string): Promise<string> {
+    if (!this.dynamicValueConstructor) {
+      throw new Error('Dynamic value construction is not enabled. Set enableDynamicValueConstruction: true in config.');
+    }
+    return await this.dynamicValueConstructor.resolveTemplate(template);
+  }
+
+  /**
+   * Check if output matches dynamic pattern (Story 06)
+   * @param actualOutput The actual output to check
+   * @param template Template string with dynamic variables
+   * @returns Boolean indicating if the output matches the resolved template
+   */
+  async matchesDynamicPattern(actualOutput: string, template: string): Promise<boolean> {
+    if (!this.dynamicValueConstructor) {
+      throw new Error('Dynamic value construction is not enabled. Set enableDynamicValueConstruction: true in config.');
+    }
+    return await this.dynamicValueConstructor.matchesDynamicPattern(actualOutput, template);
+  }
+
+  /**
+   * Create regex pattern for volatile outputs like timestamps, PIDs (Story 06)
+   * @param patternType Type of volatile pattern to create
+   * @returns RegExp pattern for matching volatile outputs
+   */
+  createVolatilePattern(patternType: 'timestamp' | 'date' | 'pid' | 'memory' | 'time'): RegExp {
+    if (!this.dynamicValueConstructor) {
+      throw new Error('Dynamic value construction is not enabled. Set enableDynamicValueConstruction: true in config.');
+    }
+    return this.dynamicValueConstructor.createVolatilePattern(patternType);
+  }
+
+  /**
+   * Get environment values for debugging and validation (Story 06)
+   * @returns Current environment values used for template resolution
+   */
+  async getEnvironmentValues() {
+    if (!this.dynamicValueConstructor) {
+      throw new Error('Dynamic value construction is not enabled. Set enableDynamicValueConstruction: true in config.');
+    }
+    return await this.dynamicValueConstructor.getEnvironmentValues();
+  }
+
+  /**
+   * Invalidate dynamic value cache (Story 06)
+   * Useful when environment changes during test execution
+   */
+  invalidateDynamicValueCache(): void {
+    if (this.dynamicValueConstructor) {
+      this.dynamicValueConstructor.invalidateCache();
+    }
+  }
+
+  /**
+   * Enhanced WebSocket message validation with dynamic template support (Story 06)
+   * @param messages WebSocket messages to validate
+   * @returns WebSocketMessageAssertion with dynamic template support
+   */
+  expectWebSocketMessagesWithDynamicSupport(messages: string): WebSocketMessageAssertion {
+    return new WebSocketMessageAssertion(messages);
   }
 
   /**

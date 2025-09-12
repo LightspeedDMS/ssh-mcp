@@ -1,5 +1,31 @@
 # Release Notes
 
+## v2.0.1 - Terminal Echo Duplication Fix (September 2025)
+
+### 🔧 Critical Fixes
+
+**Terminal Echo Duplication Resolution**
+- Fixed persistent issue where terminal commands showed duplicate output with different formatting
+- Root cause: Dual broadcast architecture where SSH stream data was processed twice
+- SSH stream broadcasted raw output (clean with ANSI colors) and processed output (stripped ANSI, mangled formatting)
+- Solution: Modified `broadcastToLiveListeners` to bypass `prepareOutputForBrowser` processing for SSH stream data
+- Implementation: `ssh-connection-manager.ts:205` - conditional processing based on source type
+
+**Technical Details**
+- SSH stream output (source === 'system') now bypasses ANSI stripping and formatting modification
+- Non-SSH data still processes through `prepareOutputForBrowser` for necessary cleanup
+- xterm.js handles ANSI codes natively, eliminating need for server-side processing of SSH streams
+- Preserves terminal colors, cursor movements, and formatting in browser display
+
+**Validation Results**  
+- All Villenele testing framework tests passing with exact assertions
+- Single clean WebSocket messages instead of duplicated output
+- ANSI color codes preserved in terminal display
+- CRLF line endings maintained for xterm.js compatibility
+- Normal SSH terminal behavior restored
+
+---
+
 ## v2.0.0 - Interactive Terminal Epic (September 2025)
 
 ### 🎉 Major New Features

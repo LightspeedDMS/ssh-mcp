@@ -162,7 +162,7 @@ describe('Terminal History Command Permutations E2E', () => {
           'ssh_connect {"name": "single-post-websocket-test", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"sessionName": "single-post-websocket-test", "command": "date"}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "single-post-websocket-test", "command": "date"}'}
         ],
         workflowTimeout: 30000,
         sessionName: 'single-post-websocket-test'
@@ -215,8 +215,8 @@ describe('Terminal History Command Permutations E2E', () => {
           'ssh_exec {"sessionName": "balanced-commands-test", "command": "hostname"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"sessionName": "balanced-commands-test", "command": "whoami"}',
-          'ssh_exec {"sessionName": "balanced-commands-test", "command": "uname -a"}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "balanced-commands-test", "command": "whoami"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "balanced-commands-test", "command": "uname -a"}'}
         ],
         workflowTimeout: 30000,
         sessionName: 'balanced-commands-test'
@@ -291,7 +291,7 @@ describe('Terminal History Command Permutations E2E', () => {
           'ssh_exec {"sessionName": "heavy-pre-light-post-test", "command": "date"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"sessionName": "heavy-pre-light-post-test", "command": "echo \\"post-test\\""}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "heavy-pre-light-post-test", "command": "echo \\"post-test\\""}'}
         ],
         workflowTimeout: 45000, // Longer timeout for 6 commands
         sessionName: 'heavy-pre-light-post-test'

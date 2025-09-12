@@ -8,7 +8,7 @@ A Model Context Protocol (MCP) server that provides SSH session management for C
 - **Persistent SSH Sessions** - Named SSH connections that maintain state across commands
 - **Interactive Terminal Interface** - Full browser-based terminal with keyboard input and command execution
 - **Multi-Session Support** - Manage multiple independent SSH sessions simultaneously
-- **Real-time Output Streaming** - Live terminal output via WebSocket with no command echo duplication
+- **Real-time Output Streaming** - Live terminal output via WebSocket with single clean display
 - **Command History** - Track executed commands with timestamps and exit codes
 - **Session Isolation** - Each session maintains separate terminal history and state
 
@@ -25,7 +25,7 @@ A Model Context Protocol (MCP) server that provides SSH session management for C
 - **Command Queuing** - FIFO execution prevents output interleaving between user and Claude Code commands
 - **WebSocket Communication** - Bidirectional messaging for command execution and output streaming
 - **Session State Synchronization** - Multiple browser clients stay in sync with terminal state
-- **Zero Echo Duplication** - Clean single output for all commands regardless of source
+- **Clean Terminal Display** - Single output with preserved ANSI colors and formatting
 
 ## Installation & Setup
 
@@ -149,7 +149,7 @@ The browser interface provides a fully interactive terminal experience:
 - **Source Attribution** - Terminal tracks whether commands came from user input or Claude Code
 - **Queue Management** - Commands execute in order without output mixing
 - **State Persistence** - Session state maintained across browser reconnects
-- **No Echo Duplication** - Clean output without command repetition
+- **Clean Output Display** - Single command output without duplication or formatting issues
 
 **Usage**: Navigate to the monitoring URL and interact with the terminal exactly like a local SSH session. Type commands, press Enter, and see results instantly. Claude Code can also execute commands in the same session without interference.
 

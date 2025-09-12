@@ -93,7 +93,9 @@ describe('ComprehensiveResponseCollector', () => {
         workflowTimeout: 15000,
         sessionName: 'custom-session',
         preWebSocketCommands: [{ tool: 'ssh_exec', args: { command: 'ls' } }],
-        postWebSocketCommands: ['ssh_exec ls -la'],
+        postWebSocketCommands: [
+          {initiator: 'mcp-client', command: 'ssh_exec ls -la'}
+        ],
         historyReplayTimeout: 5000,
         commandTimeout: 25000
       };
@@ -138,10 +140,10 @@ describe('ComprehensiveResponseCollector', () => {
       mockHistoryCapture.captureInitialHistory.mockResolvedValue();
       mockHistoryCapture.waitForHistoryReplayComplete.mockResolvedValue();
       mockHistoryCapture.getHistoryMessages.mockReturnValue([
-        { timestamp: 1000, data: 'History message\r\n', isHistoryReplay: true, sequenceNumber: 1 }
+        { timestamp: 1000, data: 'History message\r\n', type: 'history_replay', isHistoryReplay: true, sequenceNumber: 1 }
       ]);
       mockHistoryCapture.getRealTimeMessages.mockReturnValue([
-        { timestamp: 2000, data: 'Real-time message\r\n', isHistoryReplay: false, sequenceNumber: 2 }
+        { timestamp: 2000, data: 'Real-time message\r\n', type: 'websocket_received', isHistoryReplay: false, sequenceNumber: 2 }
       ]);
       mockPostWebSocketExecutor.executeCommands.mockResolvedValue([]);
 
@@ -199,12 +201,12 @@ describe('ComprehensiveResponseCollector', () => {
       mockHistoryCapture.captureInitialHistory.mockResolvedValue();
       mockHistoryCapture.waitForHistoryReplayComplete.mockResolvedValue();
       mockHistoryCapture.getHistoryMessages.mockReturnValue([
-        { timestamp: 1000, data: 'Line 1\r\n', isHistoryReplay: true, sequenceNumber: 1 },
-        { timestamp: 1001, data: 'Line 2\r\n', isHistoryReplay: true, sequenceNumber: 2 }
+        { timestamp: 1000, data: 'Line 1\r\n', type: 'history_replay', isHistoryReplay: true, sequenceNumber: 1 },
+        { timestamp: 1001, data: 'Line 2\r\n', type: 'history_replay', isHistoryReplay: true, sequenceNumber: 2 }
       ]);
       mockHistoryCapture.getRealTimeMessages.mockReturnValue([
-        { timestamp: 2000, data: 'Real-time 1\r\n', isHistoryReplay: false, sequenceNumber: 3 },
-        { timestamp: 2001, data: 'Real-time 2\r\n', isHistoryReplay: false, sequenceNumber: 4 }
+        { timestamp: 2000, data: 'Real-time 1\r\n', type: 'websocket_received', isHistoryReplay: false, sequenceNumber: 3 },
+        { timestamp: 2001, data: 'Real-time 2\r\n', type: 'websocket_received', isHistoryReplay: false, sequenceNumber: 4 }
       ]);
       mockPostWebSocketExecutor.executeCommands.mockResolvedValue([]);
 
@@ -234,10 +236,10 @@ describe('ComprehensiveResponseCollector', () => {
       mockHistoryCapture.captureInitialHistory.mockResolvedValue();
       mockHistoryCapture.waitForHistoryReplayComplete.mockResolvedValue();
       mockHistoryCapture.getHistoryMessages.mockReturnValue([
-        { timestamp: 1000, data: 'History\r\n', isHistoryReplay: true, sequenceNumber: 1 }
+        { timestamp: 1000, data: 'History\r\n', type: 'history_replay', isHistoryReplay: true, sequenceNumber: 1 }
       ]);
       mockHistoryCapture.getRealTimeMessages.mockReturnValue([
-        { timestamp: 2000, data: 'Real-time\r\n', isHistoryReplay: false, sequenceNumber: 2 }
+        { timestamp: 2000, data: 'Real-time\r\n', type: 'websocket_received', isHistoryReplay: false, sequenceNumber: 2 }
       ]);
       mockPostWebSocketExecutor.executeCommands.mockResolvedValue([]);
 

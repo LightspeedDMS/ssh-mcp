@@ -5,22 +5,25 @@
  * command tracking to prevent race conditions and security vulnerabilities.
  * 
  * NO MOCKING OR SIMULATION - This is real production code that handles actual terminal input.
+ * 
+ * BROWSER COMPATIBILITY: This file compiles to a browser-compatible global script.
+ * It does NOT use ES6 modules - it defines TerminalInputHandler in the global scope
+ * for use with regular <script> tags.
  */
 
-export interface TerminalInputHandlerConfig {
+// TypeScript interfaces (only exist at compile time, not runtime)
+interface TerminalInputHandlerConfig {
   validateInput?: boolean;
   maxLineLength?: number;
   commandTimeout?: number;
 }
 
-export interface TerminalState {
+interface TerminalState {
   currentLine: string;
   cursorPosition: number;
-  isLocked: boolean;
-  commandId: string | null;
 }
 
-export interface TerminalMessage {
+interface TerminalMessage {
   type: 'terminal_output' | 'terminal_input' | 'error';
   sessionName?: string;
   data?: string;
@@ -33,8 +36,10 @@ export interface TerminalMessage {
 /**
  * Production Terminal Input Handler
  * Handles real terminal input with security, validation, and proper state management
+ * 
+ * This class is defined in the global scope (window.TerminalInputHandler) for browser compatibility.
  */
-export class TerminalInputHandler {
+class TerminalInputHandler {
   private terminal: any; // xterm.js Terminal instance
   private webSocket: WebSocket;
   private sessionName: string;
@@ -60,9 +65,7 @@ export class TerminalInputHandler {
     
     this.state = {
       currentLine: '',
-      cursorPosition: 0,
-      isLocked: false,
-      commandId: null
+      cursorPosition: 0
     };
 
     this.initializeTerminalHandlers();
@@ -81,10 +84,6 @@ export class TerminalInputHandler {
    */
   public handleInput(data: string): void {
     try {
-      // Block input if terminal is locked during command execution
-      if (this.state.isLocked) {
-        return;
-      }
 
       // Validate input for security
       if (this.config.validateInput && !this.validateInput(data)) {
@@ -155,8 +154,8 @@ export class TerminalInputHandler {
     
     this.state.cursorPosition++;
     
-    // Echo character to terminal
-    this.terminal.write(char);
+    // NOTE: No local echo - let server handle all terminal output
+    // This prevents echo duplication issues
   }
 
   /**
@@ -228,11 +227,9 @@ export class TerminalInputHandler {
       this.commandCounter++;
       const commandId = `cmd_${Date.now()}_${this.commandCounter}`;
       
-      // Move to new line
-      this.terminal.write('\r\n');
+      // NOTE: Do NOT write to terminal here - let server handle all output
+      // This prevents echo duplication issues
       
-      // Lock terminal during command execution
-      this.lockTerminal(commandId);
       
       // Send command via WebSocket if connection is open
       if (this.webSocket.readyState === WebSocket.OPEN) {
@@ -246,9 +243,8 @@ export class TerminalInputHandler {
         
         this.webSocket.send(JSON.stringify(message));
       } else {
-        // WebSocket not available - show error and unlock
+        // WebSocket not available - show error
         this.showError('Connection lost');
-        this.unlockTerminal();
         return;
       }
       
@@ -256,64 +252,22 @@ export class TerminalInputHandler {
       this.state.currentLine = '';
       this.state.cursorPosition = 0;
       
-      // Set timeout to unlock terminal if command doesn't complete
-      if (this.config.commandTimeout) {
-        setTimeout(() => {
-          if (this.state.isLocked && this.state.commandId === commandId) {
-            this.showError('Command timeout');
-            this.unlockTerminal();
-          }
-        }, this.config.commandTimeout);
-      }
       
     } catch (error) {
       console.error('Error submitting command:', error);
       this.showError('Command submission failed');
-      this.unlockTerminal();
     }
   }
 
-  /**
-   * Lock terminal during command execution
-   */
-  private lockTerminal(commandId: string): void {
-    this.state.isLocked = true;
-    this.state.commandId = commandId;
-    
-    const terminalElement = document.getElementById('terminal');
-    if (terminalElement) {
-      terminalElement.classList.add('terminal-locked');
-    }
-  }
-
-  /**
-   * Unlock terminal after command completion
-   */
-  private unlockTerminal(): void {
-    this.state.isLocked = false;
-    this.state.commandId = null;
-    
-    const terminalElement = document.getElementById('terminal');
-    if (terminalElement) {
-      terminalElement.classList.remove('terminal-locked');
-    }
-  }
 
   /**
    * Handle terminal output messages from WebSocket
-   * This determines when to unlock the terminal based on prompt detection
    */
   public handleTerminalOutput(message: TerminalMessage): void {
     try {
       if (message.type === 'terminal_output' && message.data) {
         // Write output to terminal
         this.terminal.write(message.data);
-        
-        // Check if this output indicates command completion
-        // Only unlock for user commands, not Claude Code commands
-        if (message.source !== 'claude_code' && this.isPromptLine(message.data)) {
-          this.unlockTerminal();
-        }
       }
     } catch (error) {
       console.error('Error handling terminal output:', error);
@@ -333,7 +287,7 @@ export class TerminalInputHandler {
     const promptPatterns = [
       /^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+:[~\/][^$]*\$\s*$/, // user@host:path$ 
       /^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+:[~\/][^#]*#\s*$/, // user@host:path# (root)
-      /^\[[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\s+[^\]]+\]\$\s*$/, // [user@host project]$ (bracket format)
+      /^\[[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\s*[^\]]+\]\$\s*$/, // [user@host project]$ (bracket format)
       /^\[\d{2}:\d{2}:\d{2}\][^$]*\$\s*$/,                // [HH:MM:SS]...$ (with timestamp)
       /^[>]\s*$/                                           // Simple > prompt (minimal)
     ];
@@ -364,15 +318,13 @@ export class TerminalInputHandler {
     return this.state.cursorPosition;
   }
 
-  public isLocked(): boolean {
-    return this.state.isLocked;
-  }
-
-  public getCommandId(): string | null {
-    return this.state.commandId;
-  }
 
   public getState(): Readonly<TerminalState> {
     return { ...this.state };
   }
+}
+
+// Only set on window if we're in a browser environment
+if (typeof window !== 'undefined') {
+  (window as any).TerminalInputHandler = TerminalInputHandler;
 }

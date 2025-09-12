@@ -36,8 +36,8 @@ describe('Terminal Fixes Verification', () => {
           'ssh_connect {"name": "test-no-double-echo", "host": "localhost", "username": "jsbattig", "keyFilePath": "/home/jsbattig/.ssh/id_ed25519"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"sessionName": "test-no-double-echo", "command": "echo hello"}',
-          'ssh_exec {"sessionName": "test-no-double-echo", "command": "pwd"}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "test-no-double-echo", "command": "echo hello"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "test-no-double-echo", "command": "pwd"}'}
         ],
         workflowTimeout: 30000,
         sessionName: 'test-no-double-echo'
@@ -80,7 +80,7 @@ describe('Terminal Fixes Verification', () => {
           'ssh_connect {"name": "test-command-separation", "host": "localhost", "username": "jsbattig", "keyFilePath": "/home/jsbattig/.ssh/id_ed25519"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"sessionName": "test-command-separation", "command": "echo testing"}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "test-command-separation", "command": "echo testing"}'}
         ],
         workflowTimeout: 30000,
         sessionName: 'test-command-separation'
@@ -207,7 +207,7 @@ describe('Terminal Fixes Verification', () => {
           'ssh_connect {"name": "test-terminal-flow", "host": "localhost", "username": "jsbattig", "keyFilePath": "/home/jsbattig/.ssh/id_ed25519"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"sessionName": "test-terminal-flow", "command": "whoami"}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "test-terminal-flow", "command": "whoami"}'}
         ],
         workflowTimeout: 30000,
         sessionName: 'test-terminal-flow'

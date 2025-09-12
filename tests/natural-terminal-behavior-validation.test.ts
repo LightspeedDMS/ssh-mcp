@@ -16,8 +16,8 @@ describe('Natural Terminal Behavior Validation', () => {
         'ssh_exec {"sessionName": "natural-flow-test", "command": "pwd"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "natural-flow-test", "command": "echo NATURAL_FLOW_SUCCESS"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "natural-flow-test", "command": "echo NATURAL_FLOW_SUCCESS"}'}
+        ],
       workflowTimeout: 25000,
       sessionName: 'natural-flow-test'
     };
@@ -85,10 +85,10 @@ describe('Natural Terminal Behavior Validation', () => {
         'ssh_connect {"name": "rapid-commands-test", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "rapid-commands-test", "command": "echo CMD1"}',
-        'ssh_exec {"sessionName": "rapid-commands-test", "command": "echo CMD2"}',
-        'ssh_exec {"sessionName": "rapid-commands-test", "command": "echo CMD3"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "rapid-commands-test", "command": "echo CMD1"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "rapid-commands-test", "command": "echo CMD2"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "rapid-commands-test", "command": "echo CMD3"}'}
+        ],
       workflowTimeout: 20000,
       sessionName: 'rapid-commands-test'
     };

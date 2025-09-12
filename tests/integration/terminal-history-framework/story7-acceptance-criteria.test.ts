@@ -27,8 +27,8 @@ describe('Story 7: Flexible Command Configuration - Acceptance Criteria', () => 
           'ssh_exec {"command": "pwd"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"command": "whoami"}',
-          'ssh_disconnect {}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"command": "whoami"}'},
+          {initiator: 'mcp-client', command: 'ssh_disconnect {}'}
         ],
         workflowTimeout: 30000,
         sessionName: 'acceptance-test-session'
@@ -59,7 +59,7 @@ describe('Story 7: Flexible Command Configuration - Acceptance Criteria', () => 
           'ssh_connect {"host": "localhost", "port": 22, "options": {"compression": true, "timeout": 30000}}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"command": "ls", "options": {"env": {"PATH": "/usr/bin:/bin"}, "timeout": 5000}}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"command": "ls", "options": {"env": {"PATH": "/usr/bin:/bin"}, "timeout": 5000}}'}
         ]
       };
 
@@ -82,8 +82,8 @@ describe('Story 7: Flexible Command Configuration - Acceptance Criteria', () => 
       const configWithEmptyPre: CommandConfigurationJSON = {
         preWebSocketCommands: [],  // Empty pre-WebSocket phase
         postWebSocketCommands: [
-          'ssh_exec {"command": "echo test"}',
-          'ssh_disconnect {}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"command": "echo test"}'},
+          {initiator: 'mcp-client', command: 'ssh_disconnect {}'}
         ]
       };
 
@@ -133,8 +133,8 @@ describe('Story 7: Flexible Command Configuration - Acceptance Criteria', () => 
           'ssh_disconnect {}'
         ],
         postWebSocketCommands: [
-          'ssh_status {}',
-          'ssh_list_sessions {}'
+          {initiator: 'mcp-client', command: 'ssh_status {}'},
+          {initiator: 'mcp-client', command: 'ssh_list_sessions {}'}
         ]
       };
 
@@ -248,15 +248,15 @@ describe('Story 7: Flexible Command Configuration - Acceptance Criteria', () => 
           'ssh_exec {"command": "mysql -u root -e \'SHOW PROCESSLIST\'"}'
         ],
         postWebSocketCommands: [
-          'ssh_switch_session {"sessionName": "server1"}',
-          'ssh_exec {"command": "tail -n 10 /var/log/nginx/access.log"}',
-          'ssh_disconnect {}',
-          'ssh_switch_session {"sessionName": "server2"}',
-          'ssh_exec {"command": "systemctl status nginx"}',
-          'ssh_disconnect {}',
-          'ssh_switch_session {"sessionName": "database"}',
-          'ssh_exec {"command": "mysqladmin status"}',
-          'ssh_disconnect {}'
+          {initiator: 'mcp-client', command: 'ssh_switch_session {"sessionName": "server1"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"command": "tail -n 10 /var/log/nginx/access.log"}'},
+          {initiator: 'mcp-client', command: 'ssh_disconnect {}'},
+          {initiator: 'mcp-client', command: 'ssh_switch_session {"sessionName": "server2"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"command": "systemctl status nginx"}'},
+          {initiator: 'mcp-client', command: 'ssh_disconnect {}'},
+          {initiator: 'mcp-client', command: 'ssh_switch_session {"sessionName": "database"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"command": "mysqladmin status"}'},
+          {initiator: 'mcp-client', command: 'ssh_disconnect {}'}
         ],
         workflowTimeout: 120000,  // 2 minutes for complex workflow
         sessionName: 'multi-server-monitoring'
@@ -306,14 +306,14 @@ describe('Story 7: Flexible Command Configuration - Acceptance Criteria', () => 
           'ssh_exec {"command": "top -b -n 1"}'
         ],
         postWebSocketCommands: [
-          'ssh_switch_session {"sessionName": "load-test"}',
-          'ssh_exec {"command": "ps aux | grep ab"}',
-          'ssh_exec {"command": "netstat -an | grep :80"}',
-          'ssh_disconnect {}',
-          'ssh_switch_session {"sessionName": "monitor"}',
-          'ssh_exec {"command": "free -h"}',
-          'ssh_exec {"command": "df -h"}',
-          'ssh_disconnect {}'
+          {initiator: 'mcp-client', command: 'ssh_switch_session {"sessionName": "load-test"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"command": "ps aux | grep ab"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"command": "netstat -an | grep :80"}'},
+          {initiator: 'mcp-client', command: 'ssh_disconnect {}'},
+          {initiator: 'mcp-client', command: 'ssh_switch_session {"sessionName": "monitor"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"command": "free -h"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"command": "df -h"}'},
+          {initiator: 'mcp-client', command: 'ssh_disconnect {}'}
         ],
         workflowTimeout: 180000,
         sessionName: 'load-test-monitoring'
@@ -351,12 +351,12 @@ describe('Story 7: Flexible Command Configuration - Acceptance Criteria', () => 
           'ssh_exec {"command": "pm2 status"}'
         ],
         postWebSocketCommands: [
-          'ssh_switch_session {"sessionName": "web-server"}',
-          'ssh_exec {"command": "tail -f /var/log/nginx/error.log"}',
-          'ssh_disconnect {}',
-          'ssh_switch_session {"sessionName": "app-server"}',
-          'ssh_exec {"command": "pm2 logs --lines 50"}',
-          'ssh_disconnect {}'
+          {initiator: 'mcp-client', command: 'ssh_switch_session {"sessionName": "web-server"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"command": "tail -f /var/log/nginx/error.log"}'},
+          {initiator: 'mcp-client', command: 'ssh_disconnect {}'},
+          {initiator: 'mcp-client', command: 'ssh_switch_session {"sessionName": "app-server"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"command": "pm2 logs --lines 50"}'},
+          {initiator: 'mcp-client', command: 'ssh_disconnect {}'}
         ],
         // AC3: Valid configuration parameters
         workflowTimeout: 90000,
@@ -425,8 +425,8 @@ describe('Story 7: Flexible Command Configuration - Acceptance Criteria', () => 
           'ssh_create_session {"sessionName": "test2"}'
         ],
         postWebSocketCommands: [
-          'ssh_disconnect {}',
-          'ssh_disconnect {}'
+          {initiator: 'mcp-client', command: 'ssh_disconnect {}'},
+          {initiator: 'mcp-client', command: 'ssh_disconnect {}'}
         ],
         workflowTimeout: 0,  // Invalid timeout
         sessionName: 'test-session'

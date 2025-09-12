@@ -18,9 +18,9 @@ describe('Triple Prompt Bug Reproduction', () => {
         'ssh_connect {"name": "bug-test-session", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "bug-test-session", "command": "whoami"}',
-        'ssh_exec {"sessionName": "bug-test-session", "command": "pwd"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "bug-test-session", "command": "whoami"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "bug-test-session", "command": "pwd"}'}
+        ],
       workflowTimeout: 30000,
       sessionName: 'bug-test-session'
     };
@@ -60,8 +60,8 @@ describe('Triple Prompt Bug Reproduction', () => {
         'ssh_connect {"name": "document-bug-session", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "document-bug-session", "command": "whoami"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "document-bug-session", "command": "whoami"}'}
+        ],
       workflowTimeout: 30000,
       sessionName: 'document-bug-session'
     };

@@ -32,8 +32,8 @@ describe('Terminal Display Bug Reproduction', () => {
         'ssh_exec {"sessionName": "post-restart-test", "command": "ls"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "post-restart-test", "command": "pwd"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "post-restart-test", "command": "pwd"}'}
+        ],
       workflowTimeout: 30000,
       sessionName: 'post-restart-test'
     };

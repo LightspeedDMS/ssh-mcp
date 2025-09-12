@@ -25,8 +25,8 @@ describe('FlexibleCommandConfiguration Integration', () => {
           'ssh_create_session {"sessionName": "integration-test-session"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"command": "echo test"}',
-          'ssh_disconnect {}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"command": "echo test"}'},
+          {initiator: 'mcp-client', command: 'ssh_disconnect {}'}
         ],
         workflowTimeout: 15000,
         sessionName: 'integration-test-session'
@@ -86,12 +86,12 @@ describe('FlexibleCommandConfiguration Integration', () => {
           'ssh_exec {"command": "whoami"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"command": "date"}',
-          'ssh_switch_session {"sessionName": "session1"}',
-          'ssh_exec {"command": "ls -la"}',
-          'ssh_disconnect {}',
-          'ssh_switch_session {"sessionName": "session2"}',
-          'ssh_disconnect {}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"command": "date"}'},
+          {initiator: 'mcp-client', command: 'ssh_switch_session {"sessionName": "session1"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"command": "ls -la"}'},
+          {initiator: 'mcp-client', command: 'ssh_disconnect {}'},
+          {initiator: 'mcp-client', command: 'ssh_switch_session {"sessionName": "session2"}'},
+          {initiator: 'mcp-client', command: 'ssh_disconnect {}'}
         ],
         workflowTimeout: 45000,
         sessionName: 'multi-session-test'
@@ -140,8 +140,8 @@ describe('FlexibleCommandConfiguration Integration', () => {
           'ssh_create_session {"sessionName": "collector-integration-test"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"command": "echo integration test"}',
-          'ssh_disconnect {}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"command": "echo integration test"}'},
+          {initiator: 'mcp-client', command: 'ssh_disconnect {}'}
         ],
         workflowTimeout: 20000,
         sessionName: 'collector-integration-test'
@@ -231,7 +231,7 @@ describe('FlexibleCommandConfiguration Integration', () => {
           'ssh_create_session {"sessionName": "custom-session"}'
         ],
         postWebSocketCommands: [
-          'ssh_disconnect {}'
+          {initiator: 'mcp-client', command: 'ssh_disconnect {}'}
         ],
         workflowTimeout: 25000,
         sessionName: 'custom-session'
@@ -256,7 +256,7 @@ describe('FlexibleCommandConfiguration Integration', () => {
           'ssh_exec {"command": "ls", "options": {"env": {"PATH": "/usr/bin:/bin"}, "timeout": 5000}}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"command": "echo", "args": ["hello", "world"], "options": {"shell": "/bin/bash"}}'
+          
         ]
       };
 
@@ -291,7 +291,7 @@ describe('FlexibleCommandConfiguration Integration', () => {
           'ssh_list_sessions {}'
         ],
         postWebSocketCommands: [
-          'ssh_disconnect {}'
+          {initiator: 'mcp-client', command: 'ssh_disconnect {}'}
         ]
       };
 

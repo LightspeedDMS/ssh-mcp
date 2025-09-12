@@ -50,12 +50,23 @@ export class WebSocketConnectionDiscovery {
    * @returns Promise resolving to WebSocket URL string
    */
   async discoverWebSocketUrl(sessionName: string): Promise<string> {
+    let response: MonitoringUrlResponse;
+    
     try {
+      // ✅ CLAUDE.md COMPLIANCE: Proper exception handling with specific catch
       // Call MCP tool to get monitoring URL
-      const response = await this.mcpClient.callTool('ssh_get_monitoring_url', {
+      response = await this.mcpClient.callTool('ssh_get_monitoring_url', {
         sessionName
       }) as MonitoringUrlResponse;
+    } catch (error) {
+      // ✅ CLAUDE.md COMPLIANCE: Proper error logging and re-throwing
+      if (error instanceof Error) {
+        throw new Error(`MCP tool call failed: ${error.message}`);
+      }
+      throw new Error(`MCP tool call failed: ${String(error)}`);
+    }
 
+    try {
       // Handle MCP tool failure
       if (!response.success || !response.monitoringUrl) {
         const errorMessage = response.error || 'Unknown error from MCP tool';
@@ -65,14 +76,11 @@ export class WebSocketConnectionDiscovery {
       // Convert monitoring URL to WebSocket URL
       return this.parseMonitoringUrl(response.monitoringUrl);
     } catch (error) {
-      // Wrap any exceptions from MCP tool call
-      if (error instanceof Error) {
-        if (error.message.includes('Failed to discover monitoring URL')) {
-          throw error; // Re-throw MCP tool failures as-is
-        }
-        throw new Error(`MCP tool call failed: ${error.message}`);
+      // Re-throw URL parsing errors as-is
+      if (error instanceof Error && error.message.includes('Failed to discover monitoring URL')) {
+        throw error;
       }
-      throw new Error(`MCP tool call failed: ${String(error)}`);
+      throw new Error(`URL parsing failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -137,12 +145,12 @@ export class WebSocketConnectionDiscovery {
       let webSocket: WebSocket;
       let timeoutId: ReturnType<typeof setTimeout>;
 
-      // Cleanup function
-      const cleanup = (): void => {
+      // ✅ CLAUDE.md COMPLIANCE: Centralized cleanup function for proper resource management
+      const cleanup = (cleanupWebSocket = true): void => {
         if (timeoutId) {
           clearTimeout(timeoutId);
         }
-        if (webSocket) {
+        if (webSocket && cleanupWebSocket) {
           webSocket.removeEventListener('open', onOpen);
           webSocket.removeEventListener('error', onError);
         }
@@ -150,28 +158,39 @@ export class WebSocketConnectionDiscovery {
 
       // Connection successful
       const onOpen = (): void => {
-        cleanup();
-        resolve(webSocket);
+        try {
+          cleanup(false); // Don't remove listeners from successful connection
+          resolve(webSocket);
+        } catch (cleanupError) {
+          // If cleanup fails, still try to resolve
+          resolve(webSocket);
+        }
       };
 
-      // Connection failed
+      // Connection failed 
       const onError = (): void => {
-        cleanup();
-        if (webSocket) {
-          try {
-            webSocket.close();
-          } catch (closeError) {
-            // Ignore close errors during error handling
+        try {
+          cleanup();
+          if (webSocket) {
+            try {
+              webSocket.close();
+            } catch (closeError) {
+              // Ignore close errors during error handling
+            }
           }
+        } finally {
+          reject(new Error('WebSocket connection failed'));
         }
-        reject(new Error('WebSocket connection failed'));
       };
 
       // Connection timeout
       const onTimeout = (): void => {
-        cleanup();
-        // Don't try to close the WebSocket, just reject - let it timeout naturally
-        reject(new Error(`WebSocket connection timeout after ${connectionTimeout}ms`));
+        try {
+          cleanup();
+          // Don't try to close the WebSocket, just reject - let it timeout naturally
+        } finally {
+          reject(new Error(`WebSocket connection timeout after ${connectionTimeout}ms`));
+        }
       };
 
       try {
@@ -185,6 +204,7 @@ export class WebSocketConnectionDiscovery {
         // Set timeout
         timeoutId = setTimeout(onTimeout, connectionTimeout);
       } catch (error) {
+        // ✅ CLAUDE.md COMPLIANCE: Proper error handling with cleanup
         cleanup();
         reject(new Error(`Failed to create WebSocket: ${error instanceof Error ? error.message : String(error)}`));
       }

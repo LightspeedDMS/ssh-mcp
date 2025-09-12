@@ -29,9 +29,9 @@ describe('SSH Banner Fix Validation', () => {
         'ssh_exec {"sessionName": "validation-test", "command": "whoami"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "validation-test", "command": "pwd"}',
-        'ssh_exec {"sessionName": "validation-test", "command": "date"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "validation-test", "command": "pwd"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "validation-test", "command": "date"}'}
+        ],
       workflowTimeout: 30000,
       sessionName: 'validation-test'
     };
@@ -138,9 +138,9 @@ describe('SSH Banner Fix Validation', () => {
         'ssh_connect {"name": "functionality-test", "host": "localhost", "username": "jsbattig", "keyFilePath": "/home/jsbattig/.ssh/id_ed25519"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "functionality-test", "command": "echo \\"Hello World\\""}',
-        'ssh_exec {"sessionName": "functionality-test", "command": "ls -la | head -5"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "functionality-test", "command": "echo \\"Hello World\\""}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "functionality-test", "command": "ls -la | head -5"}'}
+        ],
       workflowTimeout: 30000,
       sessionName: 'functionality-test'
     };

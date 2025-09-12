@@ -147,8 +147,8 @@ describe('CRLF Command Output Validation - TDD', () => {
         'ssh_exec {"sessionName": "concatenation-test", "command": "pwd"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "concatenation-test", "command": "whoami"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "concatenation-test", "command": "whoami"}'}
+        ],
       workflowTimeout: 15000,
       sessionName: 'concatenation-test'
     };

@@ -31,7 +31,7 @@ describe('Villenele: Double Echo Detection', () => {
             ],
             postWebSocketCommands: [
                 // This will be sent character by character to simulate typing
-                'ssh_exec {"sessionName": "final-validation", "command": "whoami"}'
+                {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "final-validation", "command": "whoami"}'}
             ],
             workflowTimeout: 20000,
             sessionName: 'final-validation'
@@ -72,8 +72,8 @@ describe('Villenele: Double Echo Detection', () => {
                 'ssh_connect {"name": "final-validation", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}'
             ],
             postWebSocketCommands: [
-                'ssh_exec {"sessionName": "final-validation", "command": "pwd"}',
-                'ssh_exec {"sessionName": "final-validation", "command": "ls -la"}'
+                {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "final-validation", "command": "pwd"}'},
+                {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "final-validation", "command": "ls -la"}'}
             ],
             workflowTimeout: 30000,
             sessionName: 'final-validation'
@@ -114,7 +114,7 @@ describe('Villenele: Double Echo Detection', () => {
             ],
             postWebSocketCommands: [
                 // Test backspace behavior
-                'ssh_exec {"sessionName": "final-validation", "command": "echo test"}'
+                {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "final-validation", "command": "echo test"}'}
             ],
             workflowTimeout: 15000,
             sessionName: 'final-validation'

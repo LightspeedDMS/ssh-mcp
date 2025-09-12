@@ -66,7 +66,7 @@ describe('Bracket Prompt Format Validation', () => {
           'ssh_exec {"sessionName": "bracket-websocket-test", "command": "pwd"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"sessionName": "bracket-websocket-test", "command": "whoami"}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "bracket-websocket-test", "command": "whoami"}'}
         ],
         workflowTimeout: 30000,
         sessionName: 'bracket-websocket-test'
@@ -188,7 +188,7 @@ describe('Bracket Prompt Format Validation', () => {
           'ssh_connect {"name": "bracket-detection-test", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}',
         ],
         postWebSocketCommands: [
-          'ssh_exec {"sessionName": "bracket-detection-test", "command": "echo Prompt detection works"}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "bracket-detection-test", "command": "echo Prompt detection works"}'}
         ],
         workflowTimeout: 30000,
         sessionName: 'bracket-detection-test'

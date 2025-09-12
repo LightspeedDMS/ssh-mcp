@@ -27,7 +27,8 @@ export interface InitialHistoryReplayCaptureConfig {
  */
 export interface CapturedMessage {
   timestamp: number;
-  data: string;
+  data: any; // Must handle both string and object data from WebSocket messages
+  type: 'websocket_sent' | 'websocket_received' | 'history_replay';
   isHistoryReplay: boolean;
   sequenceNumber: number;
 }
@@ -109,6 +110,7 @@ export class InitialHistoryReplayCapture {
     const capturedMessage: CapturedMessage = {
       timestamp: Date.now(),
       data: terminalData, // Store only the terminal data, not the JSON wrapper
+      type: this.historyReplayComplete ? 'websocket_received' : 'history_replay',
       isHistoryReplay: !this.historyReplayComplete, // History replay if not yet complete
       sequenceNumber: ++this.sequenceNumber
     };
@@ -187,6 +189,26 @@ export class InitialHistoryReplayCapture {
    */
   getSequenceNumber(): number {
     return this.sequenceNumber;
+  }
+
+  /**
+   * Capture WebSocket sent message (called by PostWebSocketCommandExecutor)
+   */
+  captureWebSocketMessage(type: 'websocket_sent' | 'websocket_received', data: any): void {
+    if (!this.capturing) {
+      return;
+    }
+
+    const capturedMessage: CapturedMessage = {
+      timestamp: Date.now(),
+      data: data,
+      type: type,
+      isHistoryReplay: false, // Sent messages are never history replay
+      sequenceNumber: ++this.sequenceNumber
+    };
+
+    // Always add to real-time messages since sent messages are always real-time
+    this.realTimeMessages.push(capturedMessage);
   }
 
   /**

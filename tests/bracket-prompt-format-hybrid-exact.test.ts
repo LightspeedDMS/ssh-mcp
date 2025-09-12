@@ -170,7 +170,7 @@ describe('Bracket Prompt Format Validation - HYBRID EXACT ASSERTIONS', () => {
           'ssh_exec {"sessionName": "hybrid-websocket-test", "command": "echo PreWS"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"sessionName": "hybrid-websocket-test", "command": "echo PostWS"}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "hybrid-websocket-test", "command": "echo PostWS"}'}
         ],
         workflowTimeout: 30000,
         sessionName: 'hybrid-websocket-test'

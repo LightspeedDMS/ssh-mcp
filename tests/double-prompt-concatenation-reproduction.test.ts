@@ -56,10 +56,10 @@ describe("Double Prompt and Concatenation Bug Reproduction", () => {
         'ssh_connect {"name": "double-prompt-test", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "double-prompt-test", "command": "echo \\"test1\\""}',
-        'ssh_exec {"sessionName": "double-prompt-test", "command": "echo \\"test2\\""}',
-        'ssh_exec {"sessionName": "double-prompt-test", "command": "ls | head -3"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "double-prompt-test", "command": "echo \\"test1\\""}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "double-prompt-test", "command": "echo \\"test2\\""}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "double-prompt-test", "command": "ls | head -3"}'}
+        ],
       workflowTimeout: 30000,
       sessionName: 'double-prompt-test'
     };
@@ -96,8 +96,8 @@ describe("Double Prompt and Concatenation Bug Reproduction", () => {
         'ssh_connect {"name": "concat-test", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "concat-test", "command": "ls | head -2"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "concat-test", "command": "ls | head -2"}'}
+        ],
       workflowTimeout: 30000,
       sessionName: 'concat-test'
     };
@@ -137,9 +137,9 @@ describe("Double Prompt and Concatenation Bug Reproduction", () => {
         'ssh_connect {"name": "crlf-test", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "crlf-test", "command": "echo \\"line1\\""}',
-        'ssh_exec {"sessionName": "crlf-test", "command": "echo \\"line2\\""}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "crlf-test", "command": "echo \\"line1\\""}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "crlf-test", "command": "echo \\"line2\\""}'}
+        ],
       workflowTimeout: 30000,
       sessionName: 'crlf-test'
     };
@@ -185,10 +185,10 @@ describe("Double Prompt and Concatenation Bug Reproduction", () => {
         'ssh_exec {"sessionName": "comprehensive-bug-test", "command": "pwd"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "comprehensive-bug-test", "command": "echo \\"hello\\""}',
-        'ssh_exec {"sessionName": "comprehensive-bug-test", "command": "ls | head -2"}',
-        'ssh_exec {"sessionName": "comprehensive-bug-test", "command": "whoami"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "comprehensive-bug-test", "command": "echo \\"hello\\""}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "comprehensive-bug-test", "command": "ls | head -2"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "comprehensive-bug-test", "command": "whoami"}'}
+        ],
       workflowTimeout: 30000,
       sessionName: 'comprehensive-bug-test'
     };

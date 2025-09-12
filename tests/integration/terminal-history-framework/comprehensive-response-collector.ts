@@ -21,10 +21,10 @@
 
 import { MCPServerManager } from './mcp-server-manager';
 import { MCPClient } from './mcp-client';
-import { PreWebSocketCommandExecutor, PreWebSocketCommand } from './pre-websocket-command-executor';
+import { PreWebSocketCommandExecutor, PreWebSocketCommand, PreWebSocketCommandResult } from './pre-websocket-command-executor';
 import { WebSocketConnectionDiscovery } from './websocket-connection-discovery';
 import { InitialHistoryReplayCapture, CapturedMessage } from './initial-history-replay-capture';
-import { PostWebSocketCommandExecutor } from './post-websocket-command-executor';
+import { PostWebSocketCommandExecutor, PostWebSocketCommand, CommandExecutionResult } from './post-websocket-command-executor';
 import WebSocket from 'ws';
 
 /**
@@ -34,7 +34,7 @@ export interface ComprehensiveResponseCollectorConfig {
   workflowTimeout?: number;                // Total workflow timeout (default: 10000ms)
   sessionName?: string;                    // SSH session name
   preWebSocketCommands?: PreWebSocketCommand[];  // Commands to execute before WebSocket connection
-  postWebSocketCommands?: string[];        // Commands to execute after WebSocket connection
+  postWebSocketCommands?: PostWebSocketCommand[];  // Commands to execute after WebSocket connection
   historyReplayTimeout?: number;           // History replay phase timeout (default: 5000ms)
   commandTimeout?: number;                 // Individual command timeout (default: 30000ms)
 }
@@ -68,6 +68,8 @@ export interface WorkflowResult {
   error?: string;                          // Error message if workflow failed
   totalExecutionTime: number;              // Total workflow execution time
   phaseBreakdown?: PhaseBreakdown;         // Detailed breakdown of workflow phases
+  preWebSocketResults?: PreWebSocketCommandResult[];  // Pre-WebSocket command execution results
+  postWebSocketResults?: CommandExecutionResult[];     // Post-WebSocket command execution results
 }
 
 /**
@@ -84,6 +86,8 @@ export class ComprehensiveResponseCollector {
   private currentWebSocket?: WebSocket;
   private workflowStartTime: number = 0;
   private workflowTimeoutId?: NodeJS.Timeout;
+  private preWebSocketResults: PreWebSocketCommandResult[] = [];
+  private postWebSocketResults: CommandExecutionResult[] = [];
 
   constructor(config: ComprehensiveResponseCollectorConfig = {}) {
     // Validate configuration
@@ -196,7 +200,9 @@ export class ComprehensiveResponseCollector {
         concatenatedResponses: '',
         error: error instanceof Error ? error.message : String(error),
         totalExecutionTime: totalTime,
-        phaseBreakdown
+        phaseBreakdown,
+        preWebSocketResults: this.preWebSocketResults,
+        postWebSocketResults: this.postWebSocketResults
       };
     }
   }
@@ -216,7 +222,7 @@ export class ComprehensiveResponseCollector {
 
       // Phase 2: Execute Pre-WebSocket Commands (Story 2)
       const preWebSocketStart = Date.now();
-      await this.preWebSocketExecutor!.executeCommands(this.config.preWebSocketCommands);
+      this.preWebSocketResults = await this.preWebSocketExecutor!.executeCommands(this.config.preWebSocketCommands);
       phaseBreakdown.preWebSocketCommandsSuccess = true;
       phaseBreakdown.preWebSocketExecutionTime = Date.now() - preWebSocketStart;
 
@@ -236,7 +242,7 @@ export class ComprehensiveResponseCollector {
 
       // Phase 5: Execute Post-WebSocket Commands (Story 5)
       const postWebSocketStart = Date.now();
-      await this.postWebSocketExecutor!.executeCommands(this.config.postWebSocketCommands, this.currentWebSocket);
+      this.postWebSocketResults = await this.postWebSocketExecutor!.executeCommands(this.config.postWebSocketCommands, this.currentWebSocket);
       phaseBreakdown.postWebSocketCommandsSuccess = true;
       phaseBreakdown.postWebSocketExecutionTime = Date.now() - postWebSocketStart;
 
@@ -249,7 +255,9 @@ export class ComprehensiveResponseCollector {
         success: true,
         concatenatedResponses,
         totalExecutionTime: totalTime,
-        phaseBreakdown
+        phaseBreakdown,
+        preWebSocketResults: this.preWebSocketResults,
+        postWebSocketResults: this.postWebSocketResults
       };
 
     } catch (error) {
@@ -263,7 +271,9 @@ export class ComprehensiveResponseCollector {
         concatenatedResponses: '',
         error: error instanceof Error ? error.message : String(error),
         totalExecutionTime: totalTime,
-        phaseBreakdown
+        phaseBreakdown,
+        preWebSocketResults: this.preWebSocketResults,
+        postWebSocketResults: this.postWebSocketResults
       };
     }
   }
