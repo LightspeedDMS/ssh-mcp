@@ -1,5 +1,26 @@
 # LS-SSH-MCP Project Documentation
 
+## Terminal Echo Duplication Fix (v2.0.1)
+
+### Issue Resolution
+
+**Problem**: Terminal commands showed duplicate output with different formatting - clean output followed by mangled output without ANSI colors.
+
+**Root Cause**: Dual broadcast architecture in `ssh-connection-manager.ts` where SSH stream data was processed through two different paths:
+1. Raw SSH stream (preserved ANSI colors and formatting) 
+2. Processed stream through `prepareOutputForBrowser()` (stripped ANSI codes, mangled spacing)
+
+**Solution**: Modified `broadcastToLiveListeners()` method to conditionally process data based on source type:
+- SSH stream data (source === 'system') bypasses `prepareOutputForBrowser()` 
+- Non-SSH data continues processing for necessary cleanup
+- Implementation at `ssh-connection-manager.ts:205`
+
+**Result**: Single clean terminal output with preserved ANSI colors and formatting. xterm.js handles ANSI codes natively, eliminating need for server-side processing of SSH streams.
+
+**Validation**: All Villenele testing framework tests passing with exact assertions. Terminal behavior now matches standard SSH client experience.
+
+---
+
 ## Villenele - Terminal History Testing Framework
 
 **Framework Name**: **Villenele**

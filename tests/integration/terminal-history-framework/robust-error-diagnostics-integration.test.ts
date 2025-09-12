@@ -299,7 +299,10 @@ describe('RobustErrorDiagnostics Integration Tests', () => {
         preWebSocketCommands: [
           { tool: 'ssh_create_session', args: { sessionName: testSessionName + '-tracking' } }
         ],
-        postWebSocketCommands: ['ls', 'pwd']
+        postWebSocketCommands: [
+          {initiator: 'mcp-client', command: 'ls'},
+          {initiator: 'mcp-client', command: 'pwd'}
+        ]
       });
 
       // Set up components

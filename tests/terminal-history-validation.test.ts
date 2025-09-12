@@ -95,7 +95,7 @@ describe('Terminal History Validation - User-Reported Issues', () => {
           'ssh_exec {"sessionName": "multiple-commands-test", "command": "whoami"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"sessionName": "multiple-commands-test", "command": "echo test"}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "multiple-commands-test", "command": "echo test"}'}
         ],
         workflowTimeout: 30000,
         sessionName: 'multiple-commands-test'
@@ -221,7 +221,7 @@ describe('Terminal History Validation - User-Reported Issues', () => {
           'ssh_exec {"sessionName": "post-websocket-test", "command": "pwd"}' // Pre-WebSocket history
         ],
         postWebSocketCommands: [
-          'ssh_exec {"sessionName": "post-websocket-test", "command": "whoami"}' // Real-time command
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "post-websocket-test", "command": "whoami"}'} // Real-time command
         ],
         workflowTimeout: 30000,
         sessionName: 'post-websocket-test'

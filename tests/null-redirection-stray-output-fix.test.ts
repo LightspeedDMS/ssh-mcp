@@ -24,8 +24,8 @@ describe('CRITICAL BUG FIX: Null Redirection Stray Output', () => {
         'ssh_exec {"sessionName": "test-session", "command": "whoami"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "test-session", "command": "pwd"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "test-session", "command": "pwd"}'}
+        ],
       workflowTimeout: 30000,
       sessionName: 'test-session'
     };
@@ -61,8 +61,8 @@ describe('CRITICAL BUG FIX: Null Redirection Stray Output', () => {
         'ssh_exec {"sessionName": "multi-test-session", "command": "echo test2"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "multi-test-session", "command": "echo test3"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "multi-test-session", "command": "echo test3"}'}
+        ],
       workflowTimeout: 30000,
       sessionName: 'multi-test-session'
     };

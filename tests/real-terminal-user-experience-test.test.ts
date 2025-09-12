@@ -27,9 +27,9 @@ describe('Real Terminal User Experience - Complete Fix Validation', () => {
         'ssh_exec {"sessionName": "test-terminal-fixes", "command": "pwd"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "test-terminal-fixes", "command": "whoami"}',
-        'ssh_exec {"sessionName": "test-terminal-fixes", "command": "ls -la"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "test-terminal-fixes", "command": "whoami"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "test-terminal-fixes", "command": "ls -la"}'}
+        ],
       workflowTimeout: 30000,
       sessionName: 'test-terminal-fixes'
     };

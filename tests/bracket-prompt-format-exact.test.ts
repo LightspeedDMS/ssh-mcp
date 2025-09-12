@@ -51,7 +51,7 @@ describe('Bracket Prompt Format Validation - EXACT ASSERTIONS', () => {
           'ssh_exec {"sessionName": "bracket-websocket-test-exact", "command": "pwd"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"sessionName": "bracket-websocket-test-exact", "command": "whoami"}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "bracket-websocket-test-exact", "command": "whoami"}'}
         ],
         workflowTimeout: 30000,
         sessionName: 'bracket-websocket-test-exact'
@@ -142,7 +142,7 @@ describe('Bracket Prompt Format Validation - EXACT ASSERTIONS', () => {
           'ssh_connect {"name": "bracket-detection-test-exact", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}',
         ],
         postWebSocketCommands: [
-          'ssh_exec {"sessionName": "bracket-detection-test-exact", "command": "echo Prompt detection works"}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "bracket-detection-test-exact", "command": "echo Prompt detection works"}'}
         ],
         workflowTimeout: 30000,
         sessionName: 'bracket-detection-test-exact'

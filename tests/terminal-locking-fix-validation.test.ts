@@ -16,10 +16,10 @@ describe('Terminal Locking Fix Validation', () => {
         'ssh_exec {"sessionName": "fix-validation-test", "command": "echo BEFORE_WEBSOCKET_SUCCESS"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "fix-validation-test", "command": "pwd"}',
-        'ssh_exec {"sessionName": "fix-validation-test", "command": "echo AFTER_WEBSOCKET_SUCCESS"}',
-        'ssh_exec {"sessionName": "fix-validation-test", "command": "whoami"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "fix-validation-test", "command": "pwd"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "fix-validation-test", "command": "echo AFTER_WEBSOCKET_SUCCESS"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "fix-validation-test", "command": "whoami"}'}
+        ],
       workflowTimeout: 25000,
       sessionName: 'fix-validation-test'
     };

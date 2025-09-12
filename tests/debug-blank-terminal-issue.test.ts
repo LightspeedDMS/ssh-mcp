@@ -19,8 +19,8 @@ describe('Debug Blank Terminal Issue', () => {
         'ssh_exec {"sessionName": "debug-session", "command": "whoami"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "debug-session", "command": "pwd"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "debug-session", "command": "pwd"}'}
+        ],
       workflowTimeout: 30000,
       sessionName: 'debug-session'
     };

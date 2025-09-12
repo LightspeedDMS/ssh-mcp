@@ -87,8 +87,8 @@ describe('Missing First Prompt TDD Fix', () => {
                 'ssh_exec {"sessionName": "realtime-prompt-test", "command": "pwd"}'
             ],
             postWebSocketCommands: [
-                'ssh_exec {"sessionName": "realtime-prompt-test", "command": "whoami"}'
-            ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "realtime-prompt-test", "command": "whoami"}'}
+        ],
             workflowTimeout: 30000,
             sessionName: 'realtime-prompt-test'
         };

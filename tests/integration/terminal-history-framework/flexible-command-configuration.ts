@@ -19,15 +19,17 @@
 
 import { PreWebSocketCommand } from './pre-websocket-command-executor';
 import { ComprehensiveResponseCollectorConfig } from './comprehensive-response-collector';
+import { PostWebSocketCommand, EnhancedCommandParameter } from './post-websocket-command-executor';
 
 /**
  * JSON configuration schema for flexible command configuration
+ * Enhanced to support both string and object format for postWebSocketCommands
  */
 export interface CommandConfigurationJSON {
-  preWebSocketCommands: string[];        // Commands executed before WebSocket connection (JSON format)
-  postWebSocketCommands: string[];       // Commands executed after WebSocket connection (JSON format)
-  workflowTimeout?: number;              // Total workflow timeout (default: 10000ms)
-  sessionName?: string;                  // SSH session name (default: 'flexible-config-session')
+  preWebSocketCommands: string[];                                    // Commands executed before WebSocket connection (JSON format)
+  postWebSocketCommands: (string | Record<string, unknown>)[];       // Commands executed after WebSocket connection (string or enhanced object format)
+  workflowTimeout?: number;                                          // Total workflow timeout (default: 10000ms)
+  sessionName?: string;                                              // SSH session name (default: 'flexible-config-session')
 }
 
 /**
@@ -49,7 +51,7 @@ export class ConfigurationValidationError extends Error {
 export class FlexibleCommandConfiguration {
   private readonly config: Required<CommandConfigurationJSON>;
   private readonly preWebSocketCommands: PreWebSocketCommand[];
-  private readonly postWebSocketCommands: string[];
+  private readonly postWebSocketCommands: PostWebSocketCommand[];
 
   constructor(configJSON: CommandConfigurationJSON) {
     // Validate configuration structure and values
@@ -90,6 +92,15 @@ export class FlexibleCommandConfiguration {
     if (!Array.isArray(config.postWebSocketCommands)) {
       throw new ConfigurationValidationError('postWebSocketCommands must be an array');
     }
+
+    // Validate each postWebSocketCommand is either string or object
+    config.postWebSocketCommands.forEach((cmd, index) => {
+      if (typeof cmd !== 'string' && (typeof cmd !== 'object' || cmd === null || Array.isArray(cmd))) {
+        throw new ConfigurationValidationError(
+          `postWebSocketCommand at index ${index} must be string or object, got ${typeof cmd}`
+        );
+      }
+    });
   }
 
   /**
@@ -121,15 +132,24 @@ export class FlexibleCommandConfiguration {
   }
 
   /**
-   * Validate postWebSocketCommands syntax (kept as strings)
+   * Validate postWebSocketCommands syntax (supports enhanced parameter objects)
    */
-  private validatePostWebSocketCommands(commands: string[]): string[] {
+  private validatePostWebSocketCommands(commands: (string | Record<string, unknown>)[]): PostWebSocketCommand[] {
+    const validatedCommands: PostWebSocketCommand[] = [];
+
     for (let i = 0; i < commands.length; i++) {
       const command = commands[i];
       
       try {
-        // Validate syntax by parsing, but keep as strings
-        this.parseCommand(command);
+        if (typeof command === 'string') {
+          // Legacy string format - validate MCP syntax
+          this.parseCommand(command);
+          validatedCommands.push(command);
+        } else {
+          // Enhanced parameter object format - validate structure
+          const validatedEnhanced = this.validateEnhancedParameterObject(command, i);
+          validatedCommands.push(validatedEnhanced);
+        }
       } catch (error) {
         // If it's already a ConfigurationValidationError, re-throw as-is
         if (error instanceof ConfigurationValidationError) {
@@ -143,7 +163,68 @@ export class FlexibleCommandConfiguration {
       }
     }
 
-    return [...commands];
+    return validatedCommands;
+  }
+
+  /**
+   * Validate enhanced parameter object structure
+   */
+  private validateEnhancedParameterObject(command: Record<string, unknown>, index: number): EnhancedCommandParameter {
+    // Validate required fields
+    if (!command.hasOwnProperty('initiator')) {
+      throw new ConfigurationValidationError(
+        `Enhanced parameter at index ${index} missing required field 'initiator'`
+      );
+    }
+
+    if (!command.hasOwnProperty('command')) {
+      throw new ConfigurationValidationError(
+        `Enhanced parameter at index ${index} missing required field 'command'`
+      );
+    }
+
+    // Validate initiator
+    if (command.initiator !== 'browser' && command.initiator !== 'mcp-client') {
+      throw new ConfigurationValidationError(
+        `Enhanced parameter at index ${index}: initiator must be 'browser' or 'mcp-client', got '${command.initiator}'`
+      );
+    }
+
+    // Validate command
+    if (typeof command.command !== 'string' || (command.command as string).trim().length === 0) {
+      throw new ConfigurationValidationError(
+        `Enhanced parameter at index ${index}: command must be non-empty string`
+      );
+    }
+
+    // Validate optional cancel parameter
+    if (command.cancel !== undefined && typeof command.cancel !== 'boolean') {
+      throw new ConfigurationValidationError(
+        `Enhanced parameter at index ${index}: cancel must be boolean if provided`
+      );
+    }
+
+    // Validate optional waitToCancelMs parameter
+    if (command.waitToCancelMs !== undefined) {
+      if (typeof command.waitToCancelMs !== 'number') {
+        throw new ConfigurationValidationError(
+          `Enhanced parameter at index ${index}: waitToCancelMs must be number if provided`
+        );
+      }
+      if (command.waitToCancelMs <= 0) {
+        throw new ConfigurationValidationError(
+          `Enhanced parameter at index ${index}: waitToCancelMs must be positive number`
+        );
+      }
+    }
+
+    // Return properly typed enhanced parameter
+    return {
+      initiator: command.initiator as 'browser' | 'mcp-client',
+      command: command.command as string,
+      cancel: command.cancel as boolean | undefined,
+      waitToCancelMs: command.waitToCancelMs as number | undefined
+    };
   }
 
   /**
@@ -175,8 +256,8 @@ export class FlexibleCommandConfiguration {
     try {
       args = JSON.parse(jsonPart);
     } catch (error) {
-      // Re-throw the original error message to preserve error hierarchy
-      throw new ConfigurationValidationError(`Invalid JSON in command: ${jsonPart}`);
+      // Re-throw as a generic error to be wrapped by calling context
+      throw new Error(`Invalid JSON in command: ${jsonPart}`);
     }
 
     // Ensure args is an object
@@ -200,9 +281,9 @@ export class FlexibleCommandConfiguration {
   }
 
   /**
-   * Get postWebSocketCommands as strings (for ComprehensiveResponseCollector)
+   * Get postWebSocketCommands as PostWebSocketCommand array (supports enhanced parameters)
    */
-  getPostWebSocketCommands(): string[] {
+  getPostWebSocketCommands(): PostWebSocketCommand[] {
     return [...this.postWebSocketCommands];
   }
 

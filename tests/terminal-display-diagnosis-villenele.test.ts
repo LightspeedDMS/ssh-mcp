@@ -58,8 +58,8 @@ describe('Terminal Display Diagnosis with Villenele Framework', () => {
         ],
         postWebSocketCommands: [
           // Test real-time command execution after WebSocket connection
-          'ssh_exec {"sessionName": "complete-fix-test", "command": "date"}',
-          'ssh_exec {"sessionName": "complete-fix-test", "command": "hostname"}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "complete-fix-test", "command": "date"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "complete-fix-test", "command": "hostname"}'}
         ],
         workflowTimeout: 40000,
         sessionName: 'complete-fix-test'
@@ -202,7 +202,7 @@ describe('Terminal Display Diagnosis with Villenele Framework', () => {
           'ssh_exec {"sessionName": "ansi-analysis", "command": "echo \\"test command\\""}',
         ],
         postWebSocketCommands: [
-          'ssh_exec {"sessionName": "ansi-analysis", "command": "pwd"}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "ansi-analysis", "command": "pwd"}'}
         ],
         workflowTimeout: 30000,
         sessionName: 'ansi-analysis'

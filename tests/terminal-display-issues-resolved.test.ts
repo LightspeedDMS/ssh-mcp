@@ -66,10 +66,10 @@ describe("Terminal Display Issues - Resolution Confirmation", () => {
         'ssh_connect {"name": "issue-resolution-test", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "issue-resolution-test", "command": "echo \\"hello\\""}',
-        'ssh_exec {"sessionName": "issue-resolution-test", "command": "pwd"}',
-        'ssh_exec {"sessionName": "issue-resolution-test", "command": "ls | head -3"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "issue-resolution-test", "command": "echo \\"hello\\""}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "issue-resolution-test", "command": "pwd"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "issue-resolution-test", "command": "ls | head -3"}'}
+        ],
       workflowTimeout: 30000,
       sessionName: 'issue-resolution-test'
     };
@@ -156,9 +156,9 @@ describe("Terminal Display Issues - Resolution Confirmation", () => {
         'ssh_connect {"name": "regression-test", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "regression-test", "command": "whoami"}',
-        'ssh_exec {"sessionName": "regression-test", "command": "date | head -1"}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "regression-test", "command": "whoami"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "regression-test", "command": "date | head -1"}'}
+        ],
       workflowTimeout: 30000,
       sessionName: 'regression-test'
     };
@@ -243,8 +243,8 @@ describe("Terminal Display Issues - Resolution Confirmation", () => {
         'ssh_connect {"name": "tech-validation", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}'
       ],
       postWebSocketCommands: [
-        'ssh_exec {"sessionName": "tech-validation", "command": "echo \\"technical-test\\""}'
-      ],
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "tech-validation", "command": "echo \\"technical-test\\""}'}
+        ],
       workflowTimeout: 20000,
       sessionName: 'tech-validation'
     };

@@ -68,7 +68,7 @@ describe('ComprehensiveResponseCollector Integration', () => {
           { tool: 'ssh_exec', args: { command: 'echo "Pre-WebSocket test"', sessionName: 'integration-test-session' } }
         ],
         postWebSocketCommands: [
-          'ssh_exec echo "Post-WebSocket test"'
+          {initiator: 'mcp-client', command: 'ssh_exec echo "Post-WebSocket test"'}
         ],
         historyReplayTimeout: 10000,
         commandTimeout: 30000
@@ -215,7 +215,7 @@ describe('ComprehensiveResponseCollector Integration', () => {
           { tool: 'ssh_exec', args: { command: 'echo -e "Line 1\\nLine 2"', sessionName: 'crlf-test-session' } }
         ],
         postWebSocketCommands: [
-          'ssh_exec echo "Real-time line"'
+          {initiator: 'mcp-client', command: 'ssh_exec echo "Real-time line"'}
         ],
         historyReplayTimeout: 8000
       };

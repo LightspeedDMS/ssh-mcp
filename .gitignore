@@ -65,6 +65,15 @@ ssh-mcp-unified.js
 ssh-mcp-unified.log
 ssh-mcp-persistent.js
 
+# Temporary development files
+*.patch
+*-migration*.cjs
+*-audit*.cjs
+*-diagnostic*.cjs
+*DOCUMENTATION*.md
+*VALIDATION_REPORT*.md
+*migration-audit-report*.md
+
 # Optional npm cache directory
 .npm
 

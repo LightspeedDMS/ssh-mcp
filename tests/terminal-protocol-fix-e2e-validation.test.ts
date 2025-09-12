@@ -91,7 +91,7 @@ describe('E2E: Terminal Protocol Fix Validation', () => {
           'ssh_connect {"name": "bracket-prompt-test", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"sessionName": "bracket-prompt-test", "command": "uname -a"}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "bracket-prompt-test", "command": "uname -a"}'}
         ],
         workflowTimeout: 20000,
         sessionName: 'bracket-prompt-test'
@@ -124,11 +124,11 @@ describe('E2E: Terminal Protocol Fix Validation', () => {
           'ssh_connect {"name": "rapid-commands-test", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}'
         ],
         postWebSocketCommands: [
-          'ssh_exec {"sessionName": "rapid-commands-test", "command": "echo Command1"}',
-          'ssh_exec {"sessionName": "rapid-commands-test", "command": "echo Command2"}', 
-          'ssh_exec {"sessionName": "rapid-commands-test", "command": "echo Command3"}',
-          'ssh_exec {"sessionName": "rapid-commands-test", "command": "echo Command4"}',
-          'ssh_exec {"sessionName": "rapid-commands-test", "command": "echo Command5"}'
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "rapid-commands-test", "command": "echo Command1"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "rapid-commands-test", "command": "echo Command2"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "rapid-commands-test", "command": "echo Command3"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "rapid-commands-test", "command": "echo Command4"}'},
+          {initiator: 'mcp-client', command: 'ssh_exec {"sessionName": "rapid-commands-test", "command": "echo Command5"}'}
         ],
         workflowTimeout: 30000,
         sessionName: 'rapid-commands-test'
