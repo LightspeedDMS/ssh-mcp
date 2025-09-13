@@ -64,11 +64,12 @@ async function main(): Promise<void> {
     await webServer.start(); // Web server on port (e.g., 8082)
     await mcpServer.start(); // MCP server on stdio
 
-    console.error(`MCP SSH Server started - MCP: stdio, Web: ${webPort}`);
+    // CRITICAL FIX: Removed console.error to prevent stdio pollution in MCP communication
+    // Original: console.error(`MCP SSH Server started - MCP: stdio, Web: ${webPort}`);
   } catch (error) {
-    console.error(
-      "Failed to start servers:",
-      error instanceof Error ? error.message : String(error),
+    // CRITICAL: Use process.stderr.write to avoid MCP protocol stdio pollution
+    process.stderr.write(
+      `Failed to start servers: ${error instanceof Error ? error.message : String(error)}\n`
     );
     process.exit(1);
   }
@@ -76,9 +77,9 @@ async function main(): Promise<void> {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((error) => {
-    console.error(
-      "Unhandled error:",
-      error instanceof Error ? error.message : String(error),
+    // CRITICAL: Use process.stderr.write to avoid MCP protocol stdio pollution
+    process.stderr.write(
+      `Unhandled error: ${error instanceof Error ? error.message : String(error)}\n`
     );
     process.exit(1);
   });

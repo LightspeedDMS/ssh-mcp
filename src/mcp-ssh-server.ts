@@ -7,6 +7,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { SSHConnectionManager } from "./ssh-connection-manager.js";
+import { Logger, log } from "./logger.js";
 
 export interface MCPSSHServerConfig {
   sshTimeout?: number;
@@ -67,6 +68,10 @@ export class MCPSSHServer {
       ...config,
     };
 
+    // CRITICAL: Initialize logger with 'stdio' transport to prevent console output pollution
+    // MCP protocol requires clean stdio for JSON-RPC communication
+    Logger.initialize('stdio', 'MCP-Server');
+
     // Initialize MCP server
     this.mcpServer = new Server(
       {
@@ -105,7 +110,7 @@ export class MCPSSHServer {
       this.mcpRunning = true;
 
       if (this.config.logLevel === "debug") {
-        console.error("MCP SSH Server started with stdio transport");
+        log.debug("MCP SSH Server started with stdio transport");
       }
     } catch (error) {
       throw new Error(
@@ -128,14 +133,14 @@ export class MCPSSHServer {
       this.sshManager.cleanup();
 
       if (this.config.logLevel === "debug") {
-        console.error("MCP SSH Server stopped");
+        log.debug("MCP SSH Server stopped");
       }
     } catch (error) {
       // Log error but don't throw - cleanup should be graceful
       if (this.config.logLevel !== "silent") {
-        console.error(
-          "Error during MCP SSH server cleanup:",
-          error instanceof Error ? error.message : String(error),
+        log.error(
+          "Error during MCP SSH server cleanup",
+          error instanceof Error ? error : new Error(String(error))
         );
       }
     }
@@ -615,7 +620,7 @@ export class MCPSSHServer {
       this.sshManager.sendTerminalSignal(sessionName, 'SIGINT');
     } catch (error) {
       // Log warning but continue with buffer cleanup
-      console.warn(`Warning: Failed to send SIGINT signal: ${error instanceof Error ? error.message : String(error)}`);
+      log.warn(`Failed to send SIGINT signal: ${error instanceof Error ? error.message : String(error)}`);
     }
     
     // Cancel MCP commands by clearing only MCP (claude) commands from buffer

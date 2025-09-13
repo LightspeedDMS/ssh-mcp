@@ -7,6 +7,7 @@ import {
 } from "./web-server-manager.js";
 import { SSHConnectionManager } from "./ssh-connection-manager.js";
 import { PortManager } from "./port-discovery.js";
+import { Logger } from "./logger.js";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -27,6 +28,7 @@ export class Orchestrator {
   private sshManager: SSHConnectionManager;
   private portManager: PortManager;
   private config: OrchestratorConfig;
+  private logger: Logger;
   private webPort?: number;
 
   constructor(config: OrchestratorConfig = {}) {
@@ -41,6 +43,9 @@ export class Orchestrator {
     };
 
     this.portManager = new PortManager();
+    
+    // Use file transport for orchestrator to avoid stdio pollution
+    this.logger = new Logger('file', 'ORCHESTRATOR');
     this.sshManager = new SSHConnectionManager();
 
     const mcpConfig: MCPSSHServerConfig = {
@@ -114,9 +119,8 @@ export class Orchestrator {
     try {
       await fs.promises.writeFile(portFilePath, port.toString(), "utf8");
     } catch (error) {
-      console.warn(
-        `Warning: Could not write port to file ${portFilePath}:`,
-        error instanceof Error ? error.message : String(error),
+      this.logger.warn(
+        `Could not write port to file ${portFilePath}: ${error instanceof Error ? error.message : String(error)}`
       );
     }
   }
@@ -193,9 +197,9 @@ async function main(): Promise<void> {
   try {
     await orchestrator.start();
   } catch (error) {
-    console.error(
-      "Failed to start orchestrator:",
-      error instanceof Error ? error.message : String(error),
+    // CRITICAL: Use process.stderr.write to avoid stdio pollution
+    process.stderr.write(
+      `Failed to start orchestrator: ${error instanceof Error ? error.message : String(error)}\n`
     );
     process.exit(1);
   }
@@ -203,9 +207,9 @@ async function main(): Promise<void> {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((error) => {
-    console.error(
-      "Unhandled error:",
-      error instanceof Error ? error.message : String(error),
+    // CRITICAL: Use process.stderr.write to avoid stdio pollution
+    process.stderr.write(
+      `Unhandled error: ${error instanceof Error ? error.message : String(error)}\n`
     );
     process.exit(1);
   });

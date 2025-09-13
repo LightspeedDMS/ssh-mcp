@@ -7,6 +7,8 @@
  * Solution designed by elite-software-architect to restore proper echo suppression.
  */
 
+import { log } from "./logger.js";
+
 interface CommandState {
   command: string;
   timestamp: number;
@@ -56,7 +58,7 @@ export class CommandStateManager {
         this.isCommandEcho(output, state.command)) {
       
       state.echoSeen = true;
-      console.log(`[CommandStateManager] Suppressing echo for command: ${state.command}`);
+      log.debug(`Suppressing echo for command: ${state.command}`, 'CommandStateManager');
       
       // Remove the command echo line but preserve the rest
       return Buffer.from(this.removeCommandEcho(output, state.command));

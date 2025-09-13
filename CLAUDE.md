@@ -273,4 +273,58 @@ When encountering "⚠️ Message Error" in browser terminals:
 **Port Discovery**: Only the MCP server knows the current port. Always query it first.
 
 **CRITICAL**: The `mcp__ssh__ssh_get_monitoring_url` function returns the CORRECT port. Server logs may show a different port than what actually serves HTTP requests. Always trust the MCP client URL response over server logs or netstat output.
+
+## Pre-Commit Validation Workflow - CRITICAL REQUIREMENT
+
+### CI Validation Script - MANDATORY BEFORE COMMITS
+**GOLDEN RULE**: Before any commit, MUST run CI validation to ensure GitHub Actions will pass.
+
+### Available Validation Commands
+- `npm run ci-validate` - Full GitHub Actions mirror validation
+- `npm run precommit` - Alias for ci-validate (runs automatically on commit)
+- `./scripts/ci-validation.sh` - Direct script execution
+
+### CI Validation Script Components
+The `scripts/ci-validation.sh` script mirrors GitHub Actions exactly:
+
+1. **Dependency Installation**: `npm ci` (clean install)
+2. **Build Verification**: `npm run build` 
+3. **SSH Localhost Setup**: Generate keys, setup authorized_keys, verify connectivity
+4. **Linting**: Run ESLint if configured
+5. **TypeScript Check**: `tsc --noEmit` compilation verification
+6. **Quick Regression Tests**: `--testPathPattern="regression-prevention" --testNamePattern="Echo Regression Detection"`
+7. **Comprehensive Regression**: `--testPathPattern="regression-prevention" --maxWorkers=4`
+8. **Performance Regression**: `--testNamePattern="Performance" --testPathPattern="regression-prevention"`
+9. **Villenele Framework**: `--testPathPattern="terminal-history-framework" --bail`
+10. **Coverage Report**: `--coverage --testPathPattern="regression-prevention"`
+
+### Commit Workflow Integration - MANDATORY
+**ABSOLUTE REQUIREMENT**: When using `/commit-all` or any commit operation:
+
+1. **FIRST**: Run `npm run ci-validate` 
+2. **SECOND**: Only commit if validation passes 100%
+3. **THIRD**: Fix any failing validations before committing
+
+### CI Validation Failure Handling
+- **Build Failures**: Fix TypeScript/compilation errors
+- **Lint Failures**: Run `npm run lint:fix` or fix manually  
+- **Test Failures**: Debug and fix failing tests
+- **SSH Setup Issues**: Ensure SSH service running and keys configured
+
+### Integration with /commit-all Command
+The `/commit-all` command MUST:
+1. Execute `npm run ci-validate` first
+2. Only proceed with commit if all validations pass
+3. Report validation failures and stop commit process
+4. Never commit with failing CI validations
+
+### Validation Script Benefits
+- **GitHub Actions Mirror**: Identical to CI environment
+- **Early Problem Detection**: Catch issues before push
+- **SSH Environment Setup**: Automatic localhost testing setup  
+- **Comprehensive Coverage**: All regression prevention tests
+- **Performance Monitoring**: Detect performance regressions
+
+**VIOLATION CONSEQUENCES**: Committing without CI validation leads to GitHub Actions failures and broken CI pipeline.
+
 - every time you change anything related to conversation display, when you are done doing changes, you must run all Villenele tests, always, no exceptions.

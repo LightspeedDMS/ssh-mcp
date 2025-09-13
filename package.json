@@ -13,11 +13,14 @@
     "test:coverage": "jest --coverage",
     "test:e2e": "jest --testPathPattern=e2e",
     "test:unit": "jest --testPathPattern=test --testPathIgnorePatterns=e2e",
+    "test:regression": "jest --testPathPattern=regression-prevention",
     "lint": "eslint src/ tests/ --ext .ts",
     "lint:fix": "eslint src/ tests/ --ext .ts --fix",
     "dev": "ts-node src/index.ts",
     "clean": "rm -rf dist",
-    "prebuild": "npm run clean"
+    "prebuild": "npm run clean",
+    "ci-validate": "./scripts/ci-validation.sh",
+    "precommit": "npm run ci-validate"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",
