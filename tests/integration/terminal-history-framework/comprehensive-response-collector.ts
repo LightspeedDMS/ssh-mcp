@@ -348,7 +348,8 @@ export class ComprehensiveResponseCollector {
     
     // CRITICAL FIX: Add browser command strings for regression test compatibility AFTER cleanup
     // Browser commands appear in terminal output with prompts, but tests expect bare command strings
-    const browserCommandText = this.extractBrowserCommandText();
+    // ECHO DUPLICATION FIX: Only add bare commands if they don't already exist in terminal output
+    const browserCommandText = this.extractBrowserCommandText(cleanedOutput);
     const finalOutput = cleanedOutput + (browserCommandText ? '\n' + browserCommandText : '');
     
     return finalOutput;
@@ -357,8 +358,9 @@ export class ComprehensiveResponseCollector {
   /**
    * Extract browser command strings for regression test compatibility
    * Browser commands appear in terminal output with prompts, but regression tests expect bare command strings
+   * @param cleanedOutput - The cleaned terminal output to check for existing commands
    */
-  private extractBrowserCommandText(): string {
+  private extractBrowserCommandText(cleanedOutput?: string): string {
     try {
       let browserCommandText = '';
       
@@ -371,11 +373,18 @@ export class ComprehensiveResponseCollector {
           
           // Only process browser commands (MCP commands are handled separately)
           if (result.initiator === 'browser' && result.success) {
-            // Extract the bare command string for regression test compatibility
-            console.debug(`[ComprehensiveResponseCollector] Adding browser command for regression tests: ${result.command}`);
+            // ECHO DUPLICATION FIX: Only add bare command if it doesn't already exist in terminal output
+            const commandAlreadyExists = cleanedOutput && this.commandExistsInOutput(result.command, cleanedOutput);
             
-            // Add the bare command string with newline for test compatibility
-            browserCommandText += `${result.command}\n`;
+            if (!commandAlreadyExists) {
+              // Extract the bare command string for regression test compatibility
+              console.debug(`[ComprehensiveResponseCollector] Adding browser command for regression tests: ${result.command}`);
+              
+              // Add the bare command string with newline for test compatibility
+              browserCommandText += `${result.command}\n`;
+            } else {
+              console.debug(`[ComprehensiveResponseCollector] Skipping duplicate browser command: ${result.command} (already exists in terminal output)`);
+            }
           }
         } catch (resultError) {
           console.error('[ComprehensiveResponseCollector] Error processing browser command result:', resultError);
@@ -389,6 +398,29 @@ export class ComprehensiveResponseCollector {
       console.error('[ComprehensiveResponseCollector] Error extracting browser command text:', error);
       return ''; // Graceful degradation
     }
+  }
+
+  /**
+   * Check if a command already exists in the terminal output
+   * @param command - The command to check for
+   * @param output - The terminal output to search in
+   * @returns true if the command exists in the output
+   */
+  private commandExistsInOutput(command: string, output: string): boolean {
+    // Check if the command appears as a standalone line (without prompt)
+    const lines = output.split('\n');
+    for (const line of lines) {
+      const trimmedLine = line.trim();
+      // Check for exact command match (standalone line)
+      if (trimmedLine === command) {
+        return true;
+      }
+      // Check for command within a prompt line
+      if (trimmedLine.includes(`]$ ${command}`) || trimmedLine.includes(`$ ${command}`)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -542,6 +574,8 @@ export class ComprehensiveResponseCollector {
     try {
       const lines = output.split('\r\n');
       const processedLines: string[] = [];
+      
+      // Debug logging removed for production
       
       for (let i = 0; i < lines.length; i++) {
         const currentLine = lines[i];

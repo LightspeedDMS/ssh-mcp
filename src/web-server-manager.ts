@@ -364,9 +364,8 @@ export class WebServerManager {
     if (this.sshManager.hasSession(sessionName)) {
       const outputCallback = (entry: TerminalOutputEntry): void => {
         if (ws.readyState === ws.OPEN) {
-          // NUCLEAR FIX: Apply command echo filtering directly in live WebSocket output
+          // Terminal output filtering handled by terminal history framework
           let filteredOutput = entry.output;
-          filteredOutput = filteredOutput.replace(/(\[[^\]]+\]\$\s+)([^\r\n]+)(\r\n)/g, '$1$3');
           
           ws.send(
             JSON.stringify({

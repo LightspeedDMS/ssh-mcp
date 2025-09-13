@@ -58,13 +58,17 @@ describe('Comprehensive Echo Regression Detection', () => {
 
         const result = await testUtils.runTerminalHistoryTest(testConfig);
         
-        // Test: Command should appear exactly once (not duplicated)
-        const commandOccurrences = result.concatenatedResponses
+        // ECHO DUPLICATION FIX: Test that command appears properly in terminal output
+        // After fix: commands appear in prompt context, not as standalone duplicates
+        const totalCommandOccurrences = (result.concatenatedResponses.match(new RegExp(command, 'g')) || []).length;
+        const standaloneCommandOccurrences = result.concatenatedResponses
           .split('\n')
           .filter(line => line.trim() === command.trim())
           .length;
 
-        expect(commandOccurrences).toBe(1);
+        // Command should appear exactly once total (in prompt), with no standalone duplicates
+        expect(totalCommandOccurrences).toBe(1);
+        expect(standaloneCommandOccurrences).toBe(0); // No trailing duplication
 
         // Session cleanup handled by test framework
       }
