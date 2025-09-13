@@ -40,7 +40,7 @@ export class MCPServerManager {
   constructor(config: MCPServerConfig = {}) {
     // Basic configuration with defaults - no complex validation
     this.config = {
-      serverPath: config.serverPath || path.join(process.cwd(), "dist/src/mcp-server.js"),
+      serverPath: config.serverPath || this.findServerPath(),
       timeout: config.timeout !== undefined ? config.timeout : 30000,
       port: config.port !== undefined ? config.port : 0, // Auto-discover
       shutdownTimeout: config.shutdownTimeout !== undefined ? config.shutdownTimeout : 10000
@@ -50,6 +50,27 @@ export class MCPServerManager {
     if (this.config.timeout <= 0) {
       throw new Error("Timeout must be positive");
     }
+  }
+
+  /**
+   * Find the MCP server file path, trying multiple locations
+   */
+  private findServerPath(): string {
+    const possiblePaths = [
+      path.join(process.cwd(), "dist/src/mcp-server.js"),
+      path.join(process.cwd(), "dist/src/mcp-ssh-server.js"),
+      path.join(process.cwd(), "src/mcp-server.js"), // Fallback for non-built environments
+      path.join(process.cwd(), "src/mcp-ssh-server.js")
+    ];
+
+    for (const serverPath of possiblePaths) {
+      if (fs.existsSync(serverPath)) {
+        return serverPath;
+      }
+    }
+
+    // If no file found, return the preferred default for better error messages
+    return path.join(process.cwd(), "dist/src/mcp-server.js");
   }
 
   /**
