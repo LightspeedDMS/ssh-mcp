@@ -5,6 +5,7 @@ import {
 import { ErrorResponse } from "./types.js";
 import { PortManager } from "./port-discovery.js";
 import { CommandStateManager } from "./command-state-manager.js";
+import { TerminalSessionStateManager, SessionBusyError } from "./terminal-session-state-manager.js";
 import { Logger, log } from "./logger.js";
 import * as http from "http";
 import express from "express";
@@ -27,6 +28,12 @@ interface SessionState {
   }>;
 }
 
+interface RegexPatterns {
+  promptPattern: RegExp;
+  standalonePattern: RegExp;
+  middlePattern: RegExp;
+}
+
 /**
  * Pure Web Server Manager - Handles only HTTP/WebSocket functionality
  * This server provides web interface and terminal monitoring without MCP
@@ -38,6 +45,7 @@ export class WebServerManager {
   private sshManager: SSHConnectionManager;
   private portManager: PortManager;
   private commandStateManager: CommandStateManager;
+  private terminalStateManager: TerminalSessionStateManager;
   private config: WebServerManagerConfig;
   private webPort?: number;
   private running = false;
@@ -45,11 +53,15 @@ export class WebServerManager {
   // Terminal state synchronization
   private sessionStates: Map<string, SessionState> = new Map();
   
+  // Pattern cache for performance optimization
+  private patternCache: Map<string, RegexPatterns> = new Map();
+  
   // Echo suppression handled in browser terminal handler
 
   constructor(
     sshManager: SSHConnectionManager,
     config: WebServerManagerConfig = {},
+    terminalStateManager?: TerminalSessionStateManager
   ) {
     this.validateConfig(config);
 
@@ -61,6 +73,7 @@ export class WebServerManager {
     this.sshManager = sshManager;
     this.portManager = new PortManager();
     this.commandStateManager = new CommandStateManager();
+    this.terminalStateManager = terminalStateManager || new TerminalSessionStateManager();
     
     // Initialize logger with 'file' transport for safe console output in web server context
     Logger.initialize('file', 'WebServer', 'logs/web-server.log');
@@ -232,14 +245,14 @@ export class WebServerManager {
         
         // CRITICAL FIX: Initialize terminal handler BEFORE WebSocket connection
         // This prevents race condition where messages arrive before handler is ready
-        log.debug('About to create TerminalInputHandler...');
-        log.debug('TerminalInputHandler available: ' + typeof TerminalInputHandler);
+        console.debug('About to create TerminalInputHandler...');
+        console.debug('TerminalInputHandler available: ' + typeof TerminalInputHandler);
         let terminalHandler;
         try {
             terminalHandler = new TerminalInputHandler(term, ws, sessionName);
-            log.debug('TerminalInputHandler created successfully');
+            console.debug('TerminalInputHandler created successfully');
         } catch (error) {
-            log.error('CRITICAL ERROR: Failed to create TerminalInputHandler', error instanceof Error ? error : new Error(String(error)));
+            console.error('CRITICAL ERROR: Failed to create TerminalInputHandler', error instanceof Error ? error : new Error(String(error)));
             terminalHandler = null;
         }
         
@@ -254,10 +267,10 @@ export class WebServerManager {
                 if (terminalHandler && terminalHandler.handleTerminalOutput) {
                     terminalHandler.handleTerminalOutput(data);
                 } else {
-                    log.error('CRITICAL: terminalHandler not available for message: ' + JSON.stringify(data));
+                    console.error('CRITICAL: terminalHandler not available for message: ' + JSON.stringify(data));
                 }
             } catch (error) {
-                log.error('Error processing WebSocket message', error instanceof Error ? error : new Error(String(error)));
+                console.error('Error processing WebSocket message', error instanceof Error ? error : new Error(String(error)));
                 document.getElementById('connection-status').innerHTML = '⚠️ Message Error';
             }
         };
@@ -267,7 +280,7 @@ export class WebServerManager {
         };
         
         ws.onerror = function(error) {
-            log.error('WebSocket error', error instanceof Error ? error : new Error(String(error)));
+            console.error('WebSocket error', error instanceof Error ? error : new Error(String(error)));
             document.getElementById('connection-status').innerHTML = '⚠️ Connection Error';
         };
         
@@ -364,8 +377,34 @@ export class WebServerManager {
     if (this.sshManager.hasSession(sessionName)) {
       const outputCallback = (entry: TerminalOutputEntry): void => {
         if (ws.readyState === ws.OPEN) {
-          // Terminal output filtering handled by terminal history framework
+          // ARCHITECTURAL FIX: Apply WebSocket command echo suppression
           let filteredOutput = entry.output;
+          
+          // For WebSocket-initiated commands (source: 'user'), apply aggressive echo suppression
+          if (entry.source === 'user') {
+            try {
+              // Get current command from session to suppress its echo
+              const sessionState = this.getOrCreateSessionState(sessionName);
+              if (sessionState?.commandHistory && Array.isArray(sessionState.commandHistory)) {
+                const executingCommands = sessionState.commandHistory.filter(cmd => 
+                  cmd && typeof cmd.completed === 'boolean' && !cmd.completed  // Safe property access
+                );
+                
+                if (executingCommands.length > 0) {
+                  const currentCommand = executingCommands[executingCommands.length - 1];
+                  if (currentCommand?.command && typeof currentCommand.command === 'string' && currentCommand.command.trim().length > 0) {
+                    filteredOutput = this.suppressWebSocketCommandEcho(filteredOutput, currentCommand.command);
+                  }
+                }
+              }
+            } catch (error) {
+              // Log error but don't break WebSocket connection
+              console.error(`[WebSocket Echo Suppression Error] Session: ${sessionName}, Error:`, error);
+              // Use original output if suppression fails
+              filteredOutput = entry.output;
+            }
+          }
+          // For MCP commands (source: 'claude') and system output, pass through unchanged
           
           ws.send(
             JSON.stringify({
@@ -526,93 +565,123 @@ export class WebServerManager {
       
       console.debug(`[WebServerManager] Executing command: "${command}" (commandId: ${commandId}) for session: ${sessionName}`);
       
-      // EMERGENCY: CommandStateManager disabled - was destroying terminal output
-      // console.log(`[WebServerManager] Command submitted: "${command}" for session: ${sessionName}`);
-      // this.commandStateManager.onCommandSubmit(sessionName, command);
-      
-      // COMMAND CAPTURE: Add command to browser command buffer before execution
-      this.sshManager.addBrowserCommand(sessionName, command, commandId, 'user');
-
-      
-      // Store command in session history
-      const sessionState = this.getOrCreateSessionState(sessionName);
-      const historyEntry = sessionState.commandHistory.find(h => h.commandId === commandId);
-      if (historyEntry) {
-        historyEntry.command = command;
+      // STATE MACHINE: Check if session can accept new commands
+      if (!this.terminalStateManager.canAcceptCommand(sessionName)) {
+        const currentCommand = this.terminalStateManager.getCurrentCommand(sessionName);
+        const errorMessage = `Session is busy executing command: ${currentCommand?.command || 'unknown'} (initiated by ${currentCommand?.initiator || 'unknown'})`;
+        
+        this.sendErrorResponse(ws, errorMessage, commandId);
+        return;
       }
 
-      // Send visual indicator for user execution (AC5.2)
-      this.broadcastVisualIndicator(sessionName, 'user_command_executing', 'user', { commandId });
-      
-      // Send processing state (AC5.2)
-      this.broadcastProcessingState(sessionName, 'executing', commandId);
-
+      // CRITICAL FIX: Proper resource management pattern
       try {
-        // Command tracking - echo suppression handled in browser terminal handler
+        // STATE MACHINE: Start command execution
+        this.terminalStateManager.startCommandExecution(sessionName, command, commandId, 'browser');
         
-        // Execute command with user source and capture result
-        const commandResult = await this.sshManager.executeCommand(
-          sessionName, 
-          command,
-          { source: 'user' }
-        );
+        try {
+          // COMMAND CAPTURE: Add command to browser command buffer before execution
+          this.sshManager.addBrowserCommand(sessionName, command, commandId, 'user');
 
-        // Update browser command buffer with execution result
-        this.sshManager.updateBrowserCommandResult(sessionName, commandId, commandResult);
+          // Store command in session history
+          const sessionState = this.getOrCreateSessionState(sessionName);
+          // Add command to history when starting execution
+          sessionState.commandHistory.push({
+            commandId,
+            command,
+            source: 'user',
+            timestamp: Date.now(),
+            completed: false
+          });
 
-        // CRITICAL FIX: Send terminal output to browser since SSH manager doesn't broadcast to WebSocket
-        // ARCHITECTURAL FIX: SSH manager already broadcasts ALL terminal output via broadcastToLiveListeners()
-        // DO NOT duplicate output here - trust the SSH manager's real-time streaming
+          // Send visual indicator for user execution (AC5.2)
+          this.broadcastVisualIndicator(sessionName, 'user_command_executing', 'user', { commandId });
+          
+          // Send processing state (AC5.2)
+          this.broadcastProcessingState(sessionName, 'executing', commandId);
 
-        
-        // Send completion processing state (AC5.2)
-        this.broadcastProcessingState(sessionName, 'completed', commandId);
-        
-        // Send ready state for immediate recovery (AC5.5)
-        if (ws.readyState === ws.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'terminal_ready',
+          // Execute command with user source and capture result
+          const commandResult = await this.sshManager.executeCommand(
+            sessionName, 
+            command,
+            { source: 'user' }
+          );
+
+          // Update browser command buffer with execution result
+          this.sshManager.updateBrowserCommandResult(sessionName, commandId, commandResult);
+
+          // Mark command as completed in session history
+          const historyEntry = sessionState.commandHistory.find(h => h.commandId === commandId);
+          if (historyEntry) {
+            historyEntry.completed = true;
+          }
+
+          // Send completion processing state (AC5.2)
+          this.broadcastProcessingState(sessionName, 'completed', commandId);
+          
+          // Send ready state for immediate recovery (AC5.5)
+          if (ws.readyState === ws.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'terminal_ready',
+              sessionName,
+              timestamp: new Date().toISOString()
+            }));
+          }
+
+        } catch (commandError) {
+          // Handle command errors gracefully (AC5.5)
+          const errorMessage = commandError instanceof Error ? commandError.message : String(commandError);
+          
+          // Update browser command buffer with error result
+          this.sshManager.updateBrowserCommandResult(sessionName, commandId, {
+            stdout: '',
+            stderr: errorMessage,
+            exitCode: 1  // Non-zero exit code indicates error
+          });
+
+          // Mark command as completed even on error
+          const sessionStateError = this.getOrCreateSessionState(sessionName);
+          const historyEntryError = sessionStateError.commandHistory.find(h => h.commandId === commandId);
+          if (historyEntryError) {
+            historyEntryError.completed = true;
+          }
+          
+          // Send error response with source identification (AC5.5)
+          const errorResponse = {
+            type: 'command_error',
             sessionName,
+            source: 'user',
+            commandId: commandId,
+            errorMessage: errorMessage,
             timestamp: new Date().toISOString()
-          }));
+          };
+
+          if (ws.readyState === ws.OPEN) {
+            ws.send(JSON.stringify(errorResponse));
+          }
+
+          // Send error processing state
+          this.broadcastProcessingState(sessionName, 'error', commandId);
+          
+          // Send ready state for immediate recovery (AC5.5) 
+          if (ws.readyState === ws.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'terminal_ready',
+              sessionName,
+              timestamp: new Date().toISOString()
+            }));
+          }
+        } finally {
+          // CRITICAL: Always cleanup state, even if executeCommand throws
+          this.terminalStateManager.completeCommandExecution(sessionName, commandId);
         }
-
-      } catch (error) {
-        // Handle command errors gracefully (AC5.5)
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        
-        // Update browser command buffer with error result
-        this.sshManager.updateBrowserCommandResult(sessionName, commandId, {
-          stdout: '',
-          stderr: errorMessage,
-          exitCode: 1  // Non-zero exit code indicates error
-        });
-        
-        // Send error response with source identification (AC5.5)
-        const errorResponse = {
-          type: 'command_error',
-          sessionName,
-          source: 'user',
-          commandId: commandId,
-          errorMessage: errorMessage,
-          timestamp: new Date().toISOString()
-        };
-
-        if (ws.readyState === ws.OPEN) {
-          ws.send(JSON.stringify(errorResponse));
-        }
-
-        
-        // Send error processing state
-        this.broadcastProcessingState(sessionName, 'error', commandId);
-        
-        // Send ready state for immediate recovery (AC5.5) 
-        if (ws.readyState === ws.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'terminal_ready',
-            sessionName,
-            timestamp: new Date().toISOString()
-          }));
+      } catch (stateError) {
+        // Handle state management errors (SessionBusyError, etc.)
+        if (stateError instanceof SessionBusyError) {
+          this.sendErrorResponse(ws, stateError.message, commandId);
+        } else {
+          const errorMessage = stateError instanceof Error ? stateError.message : String(stateError);
+          this.sendErrorResponse(ws, `State management error: ${errorMessage}`, commandId);
         }
       }
 
@@ -872,6 +941,10 @@ export class WebServerManager {
     return { ...this.config };
   }
 
+  getTerminalStateManager(): TerminalSessionStateManager {
+    return this.terminalStateManager;
+  }
+
   // Methods that should NOT be available in pure web server
   isMCPRunning(): never {
     throw new Error("MCP functionality not available in pure web server");
@@ -1005,5 +1078,90 @@ export class WebServerManager {
         }
       });
     }
+  }
+
+  /**
+   * Get cached regex patterns for a command, creating them if necessary
+   * Optimizes performance by avoiding repeated regex creation
+   * @param command - The command to create patterns for
+   * @returns Cached regex patterns for echo suppression
+   */
+  private getCachedPatterns(command: string): RegexPatterns {
+    // Input validation and error boundaries
+    if (!command || typeof command !== 'string' || command.trim().length === 0) {
+      throw new Error(`Invalid command for pattern caching: ${command}`);
+    }
+
+    if (this.patternCache.has(command)) {
+      return this.patternCache.get(command)!;
+    }
+
+    try {
+      const escapedCommand = this.escapeRegex(command);
+      const patterns: RegexPatterns = {
+        promptPattern: new RegExp(`(\\[[^\\]]+\\]\\$\\s+)${escapedCommand}(\\r?\\n)`, 'g'),
+        standalonePattern: new RegExp(`^\\s*${escapedCommand}\\s*\\r?\\n`, 'gm'),
+        middlePattern: new RegExp(`\\r?\\n\\s*${escapedCommand}\\s*\\r?\\n`, 'g')
+      };
+
+      this.patternCache.set(command, patterns);
+      return patterns;
+    } catch (error) {
+      console.error(`[Pattern Cache Error] Failed to create patterns for command: ${command}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Suppress command echo for WebSocket-initiated commands
+   * Prevents command duplication in browser terminals by removing command echoes
+   * @param output - Terminal output data
+   * @param command - The command that was executed
+   * @returns Processed output with command echo suppressed
+   */
+  private suppressWebSocketCommandEcho(output: string, command: string): string {
+    // Input validation
+    if (!output || typeof output !== 'string') {
+      return output || '';
+    }
+    
+    try {
+      let processedOutput = output;
+      const patterns = this.getCachedPatterns(command);
+      
+      // PERFORMANCE FIX: Reset regex lastIndex to prevent state issues with global regexes
+      patterns.promptPattern.lastIndex = 0;
+      patterns.standalonePattern.lastIndex = 0;
+      patterns.middlePattern.lastIndex = 0;
+      
+      // AGGRESSIVE SUPPRESSION: Remove command echo in multiple patterns
+      
+      // 1. Remove command after bracket prompt: "[user@host path]$ command\n" -> "[user@host path]$ \n"
+      processedOutput = processedOutput.replace(patterns.promptPattern, '$1$2');
+      
+      // 2. Remove standalone command lines: "command\n" -> ""
+      processedOutput = processedOutput.replace(patterns.standalonePattern, '');
+      
+      // 3. Remove command in middle of output: "\ncommand\n" -> "\n"
+      processedOutput = processedOutput.replace(patterns.middlePattern, '\r\n');
+      
+      // Log if suppression occurred for debugging
+      if (output !== processedOutput && output.includes(command)) {
+        console.debug(`[WebSocket Echo Suppression] Removed "${command}" echo from terminal output`);
+      }
+      
+      return processedOutput;
+    } catch (error) {
+      console.error(`[Echo Suppression Error] Command: ${command}, Error:`, error);
+      // Return original output if suppression fails
+      return output;
+    }
+  }
+
+  /**
+   * Escape special regex characters in command strings
+   */
+  private escapeRegex(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 }

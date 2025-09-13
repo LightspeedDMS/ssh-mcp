@@ -5,23 +5,28 @@
  * command tracking to prevent race conditions and security vulnerabilities.
  *
  * NO MOCKING OR SIMULATION - This is real production code that handles actual terminal input.
+ *
+ * BROWSER COMPATIBILITY: This file compiles to a browser-compatible global script.
+ * It does NOT use ES6 modules - it defines TerminalInputHandler in the global scope
+ * for use with regular <script> tags.
  */
 /**
  * Production Terminal Input Handler
  * Handles real terminal input with security, validation, and proper state management
+ *
+ * This class is defined in the global scope (window.TerminalInputHandler) for browser compatibility.
  */
-export class TerminalInputHandler {
+class TerminalInputHandler {
     constructor(terminal, webSocket, sessionName, config = {}) {
         this.commandCounter = 0;
+        this.lastSubmittedCommand = '';
         this.terminal = terminal;
         this.webSocket = webSocket;
         this.sessionName = sessionName;
         this.config = Object.assign({ validateInput: true, maxLineLength: 1000, commandTimeout: 30000 }, config);
         this.state = {
             currentLine: '',
-            cursorPosition: 0,
-            isLocked: false,
-            commandId: null
+            cursorPosition: 0
         };
         this.initializeTerminalHandlers();
     }
@@ -37,10 +42,6 @@ export class TerminalInputHandler {
      */
     handleInput(data) {
         try {
-            // Block input if terminal is locked during command execution
-            if (this.state.isLocked) {
-                return;
-            }
             // Validate input for security
             if (this.config.validateInput && !this.validateInput(data)) {
                 this.showError('Invalid input detected');
@@ -103,8 +104,9 @@ export class TerminalInputHandler {
                 char +
                 this.state.currentLine.slice(this.state.cursorPosition);
         this.state.cursorPosition++;
-        // Echo character to terminal
+        // LOCAL ECHO: Show character as user types for immediate feedback
         this.terminal.write(char);
+        // SSH server echo provides the visual feedback, local echo is not needed
     }
     /**
      * Handle backspace with proper boundary checking
@@ -116,8 +118,8 @@ export class TerminalInputHandler {
                 this.state.currentLine.slice(0, this.state.cursorPosition - 1) +
                     this.state.currentLine.slice(this.state.cursorPosition);
             this.state.cursorPosition--;
-            // Send backspace sequence to terminal: backspace, space, backspace
-            this.terminal.write('\x08 \x08');
+            // ECHO FIX: Removed local backspace echo to prevent double echo with SSH server echo
+            // SSH server handles backspace display, local echo is not needed
         }
     }
     /**
@@ -128,30 +130,26 @@ export class TerminalInputHandler {
             case '\x1b[D': // Left arrow
                 if (this.state.cursorPosition > 0) {
                     this.state.cursorPosition--;
-                    this.terminal.write('\x1b[D');
+                    // ECHO FIX: Removed local cursor echo - SSH server handles cursor movement
                 }
                 break;
             case '\x1b[C': // Right arrow
                 if (this.state.cursorPosition < this.state.currentLine.length) {
                     this.state.cursorPosition++;
-                    this.terminal.write('\x1b[C');
+                    // ECHO FIX: Removed local cursor echo - SSH server handles cursor movement
                 }
                 break;
             case '\x1b[H': // Home key
             case '\x1b[1~':
                 const movesToStart = this.state.cursorPosition;
                 this.state.cursorPosition = 0;
-                if (movesToStart > 0) {
-                    this.terminal.write('\x1b[' + movesToStart + 'D');
-                }
+                // ECHO FIX: Removed local cursor movement echo - SSH server handles this
                 break;
             case '\x1b[F': // End key
             case '\x1b[4~':
                 const movesToEnd = this.state.currentLine.length - this.state.cursorPosition;
                 this.state.cursorPosition = this.state.currentLine.length;
-                if (movesToEnd > 0) {
-                    this.terminal.write('\x1b[' + movesToEnd + 'C');
-                }
+                // ECHO FIX: Removed local cursor movement echo - SSH server handles this
                 break;
             // Ignore other escape sequences to prevent terminal manipulation
         }
@@ -162,13 +160,13 @@ export class TerminalInputHandler {
     submitCommand() {
         try {
             const command = this.state.currentLine.trim();
+            // Track command for echo suppression
+            this.lastSubmittedCommand = command;
             // Generate unique command ID to track completion
             this.commandCounter++;
             const commandId = `cmd_${Date.now()}_${this.commandCounter}`;
-            // Move to new line
+            // Show command echo and move to new line for execution
             this.terminal.write('\r\n');
-            // Lock terminal during command execution
-            this.lockTerminal(commandId);
             // Send command via WebSocket if connection is open
             if (this.webSocket.readyState === WebSocket.OPEN) {
                 const message = {
@@ -181,66 +179,38 @@ export class TerminalInputHandler {
                 this.webSocket.send(JSON.stringify(message));
             }
             else {
-                // WebSocket not available - show error and unlock
+                // WebSocket not available - show error
                 this.showError('Connection lost');
-                this.unlockTerminal();
                 return;
             }
             // Reset current line state
             this.state.currentLine = '';
             this.state.cursorPosition = 0;
-            // Set timeout to unlock terminal if command doesn't complete
-            if (this.config.commandTimeout) {
-                setTimeout(() => {
-                    if (this.state.isLocked && this.state.commandId === commandId) {
-                        this.showError('Command timeout');
-                        this.unlockTerminal();
-                    }
-                }, this.config.commandTimeout);
-            }
         }
         catch (error) {
             console.error('Error submitting command:', error);
             this.showError('Command submission failed');
-            this.unlockTerminal();
-        }
-    }
-    /**
-     * Lock terminal during command execution
-     */
-    lockTerminal(commandId) {
-        this.state.isLocked = true;
-        this.state.commandId = commandId;
-        const terminalElement = document.getElementById('terminal');
-        if (terminalElement) {
-            terminalElement.classList.add('terminal-locked');
-        }
-    }
-    /**
-     * Unlock terminal after command completion
-     */
-    unlockTerminal() {
-        this.state.isLocked = false;
-        this.state.commandId = null;
-        const terminalElement = document.getElementById('terminal');
-        if (terminalElement) {
-            terminalElement.classList.remove('terminal-locked');
         }
     }
     /**
      * Handle terminal output messages from WebSocket
-     * This determines when to unlock the terminal based on prompt detection
      */
     handleTerminalOutput(message) {
         try {
             if (message.type === 'terminal_output' && message.data) {
-                // Write output to terminal
-                this.terminal.write(message.data);
-                // Check if this output indicates command completion
-                // Only unlock for user commands, not Claude Code commands
-                if (message.source !== 'claude_code' && this.isPromptLine(message.data)) {
-                    this.unlockTerminal();
+                let outputData = message.data;
+                
+                // TARGETED ECHO SUPPRESSION: Only remove duplicate command, keep all prompts
+                // Look for pattern: "$ command\r\n" at the start and remove just the command part
+                if (this.lastSubmittedCommand && this.lastSubmittedCommand.trim().length > 0) {
+                    // Escape the command for regex and look for it after "$ "
+                    const escapedCommand = this.lastSubmittedCommand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    const commandOnlyPattern = new RegExp(`\\$\\s${escapedCommand}\\r?\\n`, 'g');
+                    outputData = outputData.replace(commandOnlyPattern, '$\r\n'); 
                 }
+                
+                // Write processed output to terminal
+                this.terminal.write(outputData);
             }
         }
         catch (error) {
@@ -259,7 +229,7 @@ export class TerminalInputHandler {
         const promptPatterns = [
             /^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+:[~\/][^$]*\$\s*$/, // user@host:path$ 
             /^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+:[~\/][^#]*#\s*$/, // user@host:path# (root)
-            /^\[[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\s+[^\]]+\]\$\s*$/, // [user@host project]$ (bracket format)
+            /^\[[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\s*[^\]]+\]\$\s*$/, // [user@host project]$ (bracket format)
             /^\[\d{2}:\d{2}:\d{2}\][^$]*\$\s*$/, // [HH:MM:SS]...$ (with timestamp)
             /^[>]\s*$/ // Simple > prompt (minimal)
         ];
@@ -283,13 +253,11 @@ export class TerminalInputHandler {
     getCursorPosition() {
         return this.state.cursorPosition;
     }
-    isLocked() {
-        return this.state.isLocked;
-    }
-    getCommandId() {
-        return this.state.commandId;
-    }
     getState() {
         return Object.assign({}, this.state);
     }
+}
+// Only set on window if we're in a browser environment
+if (typeof window !== 'undefined') {
+    window.TerminalInputHandler = TerminalInputHandler;
 }

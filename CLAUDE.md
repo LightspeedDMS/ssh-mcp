@@ -328,3 +328,43 @@ The `/commit-all` command MUST:
 **VIOLATION CONSEQUENCES**: Committing without CI validation leads to GitHub Actions failures and broken CI pipeline.
 
 - every time you change anything related to conversation display, when you are done doing changes, you must run all Villenele tests, always, no exceptions.
+
+## Manual Browser Testing - Headless Terminal Test Script
+
+### Location and Usage
+**Script**: `scripts/headless-terminal-test.cjs` (executable)
+
+### Purpose
+Provides manual end-to-end testing of SSH terminal functionality using headless Puppeteer browser automation. Validates:
+- Terminal page loading and initialization
+- JavaScript error detection
+- Terminal content display (vs CSS-only issues)
+- User typing and interaction functionality
+- Echo suppression fix validation
+
+### Usage Examples
+```bash
+# Basic usage with any terminal session URL
+node scripts/headless-terminal-test.cjs http://localhost:8081/session/my-session
+
+# Quick manual test workflow:
+# 1. Connect via MCP: mcp__ssh__ssh_connect
+# 2. Execute command: mcp__ssh__ssh_exec  
+# 3. Get URL: mcp__ssh__ssh_get_monitoring_url
+# 4. Run test: node scripts/headless-terminal-test.cjs [URL]
+```
+
+### Key Features
+- **Parameterized URL**: Takes terminal URL as command line argument
+- **Content Validation**: Distinguishes between actual terminal content and CSS artifacts
+- **JavaScript Error Detection**: Reports browser console errors and page errors
+- **Interaction Testing**: Validates typing functionality and terminal responsiveness
+- **Exit Codes**: Returns proper exit codes for CI/automation integration
+- **Auto-installation**: Automatically installs Puppeteer if not available
+
+### Expected Output
+- ✅ **PASSED**: Terminal loads correctly, shows content, typing works
+- ❌ **FAILED**: Display issues, CSS-only content, or interaction failures
+
+### Integration with MCP Workflow
+Perfect for validating echo suppression fixes and browser terminal functionality after making changes to WebSocket message processing or terminal display logic.

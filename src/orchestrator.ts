@@ -8,6 +8,7 @@ import {
 import { SSHConnectionManager } from "./ssh-connection-manager.js";
 import { PortManager } from "./port-discovery.js";
 import { Logger } from "./logger.js";
+import { TerminalSessionStateManager } from "./terminal-session-state-manager.js";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -30,6 +31,7 @@ export class Orchestrator {
   private config: OrchestratorConfig;
   private logger: Logger;
   private webPort?: number;
+  private sharedStateManager: TerminalSessionStateManager;
 
   constructor(config: OrchestratorConfig = {}) {
     this.validateConfig(config);
@@ -48,13 +50,16 @@ export class Orchestrator {
     this.logger = new Logger('file', 'ORCHESTRATOR');
     this.sshManager = new SSHConnectionManager();
 
+    // Create shared state manager FIRST
+    this.sharedStateManager = new TerminalSessionStateManager();
+
     const mcpConfig: MCPSSHServerConfig = {
       sshTimeout: this.config.sshTimeout,
       maxSessions: this.config.maxSessions,
       logLevel: this.config.logLevel,
     };
 
-    this.mcpServer = new MCPSSHServer(mcpConfig);
+    this.mcpServer = new MCPSSHServer(mcpConfig, this.sshManager, this.sharedStateManager);
   }
 
   private validateConfig(config: OrchestratorConfig): void {
@@ -81,7 +86,7 @@ export class Orchestrator {
       const webConfig: WebServerManagerConfig = {
         port: this.webPort!,
       };
-      this.webServer = new WebServerManager(this.sshManager, webConfig);
+      this.webServer = new WebServerManager(this.sshManager, webConfig, this.sharedStateManager);
 
       // Configure servers with web port
       this.mcpServer.setWebServerPort(this.webPort!);

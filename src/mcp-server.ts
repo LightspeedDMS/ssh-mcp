@@ -31,9 +31,12 @@ async function main(): Promise<void> {
   const mcpServer = new MCPSSHServer(mcpConfig, sshManager);
   mcpServer.setWebServerPort(webPort);
 
-  // Configure web server with SAME SSH manager
+  // CRITICAL FIX: Share the SAME state manager instance between components
+  const sharedStateManager = mcpServer.getTerminalStateManager();
+
+  // Configure web server with SAME SSH manager AND SAME state manager
   const webConfig = { port: webPort };
-  const webServer = new WebServerManager(sshManager, webConfig);
+  const webServer = new WebServerManager(sshManager, webConfig, sharedStateManager);
 
   // Write port file
   const portFilePath = path.join(process.cwd(), ".ssh-mcp-server.port");

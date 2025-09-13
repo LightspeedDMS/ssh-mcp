@@ -117,6 +117,14 @@ interface SessionData {
 
 // Terminal output streaming interfaces
 
+interface RegexPatterns {
+  promptPattern: RegExp;
+  standalonePattern: RegExp;
+  middlePattern: RegExp;
+  startPattern: RegExp;
+  duplicatePattern: RegExp;
+}
+
 export class SSHConnectionManager implements ISSHConnectionManager {
   private static readonly MAX_OUTPUT_BUFFER_SIZE = 1000;
   private static readonly MAX_COMMAND_HISTORY_SIZE = 100;
@@ -125,6 +133,9 @@ export class SSHConnectionManager implements ISSHConnectionManager {
   private connections: Map<string, SessionData> = new Map();
   private webServerPort: number;
   private commandStateManager?: CommandStateManager;
+  
+  // Pattern cache for performance optimization
+  private patternCache: Map<string, RegexPatterns> = new Map();
 
   constructor(webServerPort: number = 8080) {
     // CRITICAL FIX: Removed console.log that was polluting stdio MCP communication
@@ -198,17 +209,12 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     const sessionData = this.connections.get(sessionName);
     if (!sessionData) return;
 
-    // EMERGENCY: CommandStateManager disabled - was destroying terminal output
-    // TODO: Fix SSH echo at protocol level, not string manipulation level
-    let processedData = data;
-
-    // CRITICAL FIX: Don't process SSH stream data - xterm.js handles ANSI codes perfectly
-    // Only process non-SSH data that might need cleaning (like API responses)
-    const browserOutput = source === 'system' ? processedData : this.prepareOutputForBrowser(processedData);
+    // Apply source-aware output processing
+    const processedData = this.prepareOutputForBrowserWithSource(data, source, sessionData);
     
     const outputEntry: TerminalOutputEntry = {
       timestamp: Date.now(),
-      output: browserOutput,
+      output: processedData,
       stream,
       rawOutput: data,
       preserveFormatting: true,
@@ -237,12 +243,12 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     const sessionData = this.connections.get(sessionName);
     if (!sessionData) return;
 
-    // ARCHITECTURAL FIX: Use consolidated output preparation for browsers
-    const browserOutput = this.prepareOutputForBrowser(data);
+    // Apply source-aware output processing
+    const processedData = this.prepareOutputForBrowserWithSource(data, source, sessionData);
     
     const outputEntry: TerminalOutputEntry = {
       timestamp: Date.now(),
-      output: browserOutput,
+      output: processedData,
       stream,
       rawOutput: data,
       preserveFormatting: true,
@@ -551,6 +557,105 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     return bracketPattern.test(lastLine) || bracketPattern.test(secondLastLine);
   }
 
+  /**
+   * Get cached regex patterns for a command, creating them if necessary
+   * Optimizes performance by avoiding repeated regex creation
+   * @param command - The command to create patterns for
+   * @returns Cached regex patterns for echo suppression
+   */
+  private getCachedPatterns(command: string): RegexPatterns {
+    // Input validation and error boundaries
+    if (!command || typeof command !== 'string' || command.trim().length === 0) {
+      throw new Error(`Invalid command for pattern caching: ${command}`);
+    }
+
+    if (this.patternCache.has(command)) {
+      return this.patternCache.get(command)!;
+    }
+
+    try {
+      const escapedCommand = this.escapeRegex(command);
+      const patterns: RegexPatterns = {
+        promptPattern: new RegExp(`(\\[[^\\]]+\\]\\$\\s+)${escapedCommand}(\\r?\\n)`, 'g'),
+        standalonePattern: new RegExp(`^\\s*${escapedCommand}\\s*\\r?\\n`, 'gm'),
+        middlePattern: new RegExp(`\\r?\\n\\s*${escapedCommand}\\s*\\r?\\n`, 'g'),
+        startPattern: new RegExp(`^\\s*${escapedCommand}\\s*\\r?\\n`, ''),
+        duplicatePattern: new RegExp(`\\n${escapedCommand}\\n${escapedCommand}\\n`, 'g')
+      };
+
+      this.patternCache.set(command, patterns);
+      return patterns;
+    } catch (error) {
+      console.error(`[Pattern Cache Error] Failed to create patterns for command: ${command}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Aggressive command echo suppression specifically for WebSocket commands
+   * Removes ALL instances of the command to prevent browser echo duplication
+   * @param data - Raw SSH output data (string)
+   * @param command - The command that was executed
+   * @returns Processed string with command echo completely suppressed
+   */
+  private suppressWebSocketCommandEcho(data: string, command: string): string {
+    // Input validation
+    if (!data || typeof data !== 'string') {
+      return data || '';
+    }
+    
+    const originalOutput = data;
+    
+    try {
+      let processedOutput = data;
+      const patterns = this.getCachedPatterns(command);
+      
+      // PERFORMANCE FIX: Reset regex lastIndex to prevent state issues with global regexes
+      patterns.promptPattern.lastIndex = 0;
+      patterns.standalonePattern.lastIndex = 0;
+      patterns.middlePattern.lastIndex = 0;
+      patterns.startPattern.lastIndex = 0;
+      patterns.duplicatePattern.lastIndex = 0;
+      
+      // AGGRESSIVE SUPPRESSION: Remove ALL occurrences of the command in various contexts
+      
+      // 1. Remove command that appears after bracket prompt: "[user@host path]$ command\n" -> "[user@host path]$ \n"
+      processedOutput = processedOutput.replace(patterns.promptPattern, '$1$2');
+      
+      // 2. Remove standalone command lines: "command\n" -> ""
+      processedOutput = processedOutput.replace(patterns.standalonePattern, '');
+      
+      // 3. Remove command in the middle of output: "\ncommand\n" -> "\n"  
+      processedOutput = processedOutput.replace(patterns.middlePattern, '\r\n');
+      
+      // 4. Remove command at start of output: "command\n" -> ""
+      processedOutput = processedOutput.replace(patterns.startPattern, '');
+      
+      // 5. Remove duplicate standalone command lines that might appear in chunks
+      processedOutput = processedOutput.replace(patterns.duplicatePattern, `\n${command}\n`);
+      
+      // Log suppression activity for debugging if needed
+      if (originalOutput !== processedOutput && originalOutput.includes(command)) {
+        console.debug(`[ECHO SUPPRESSION] Suppressed "${command}" echo - length: ${originalOutput.length} -> ${processedOutput.length}`);
+      }
+      
+      return processedOutput;
+    } catch (error) {
+      console.error(`[Echo Suppression Error] Command: ${command}, Error:`, error);
+      // Return original output if suppression fails
+      return originalOutput;
+    }
+  }
+
+  /**
+   * Escape special regex characters in command strings
+   * @param str - String to escape
+   * @returns Escaped string safe for regex
+   */
+  private escapeRegex(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
   private setupShellHandlers(sessionData: SessionData): void {
     if (!sessionData.shellChannel) {
       return;
@@ -560,11 +665,12 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     sessionData.shellChannel.on("data", (data: Buffer) => {
       let processedData = data;
       
-      // SSH server echo is legitimate and should be preserved
-      // The double echo problem was in browser terminal local echo, not SSH server echo
-      // Solution is in terminal-input-handler.js, not here
+      // Note: Echo suppression for WebSocket commands is now handled in prepareOutputForBrowser()
+      // to work with the complete accumulated output rather than individual chunks
       
       const output = processedData.toString();
+      
+      // Source-aware output processing handles echo suppression
       
       // CRITICAL FIX: Store processed output without echo duplication
       // Broadcast processed output to browsers for real-time display 
@@ -1837,6 +1943,30 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     return sanitizedMessage || 'Key file error';
   }
   
+
+  /**
+   * Source-aware output preparation that applies different processing based on command source
+   * @param output - Raw SSH output data
+   * @param source - Command source ('user' for WebSocket, 'claude' for MCP, 'system' for system output)
+   * @param sessionData - Session data containing current command info
+   * @returns Processed output optimized for browser display
+   */
+  private prepareOutputForBrowserWithSource(
+    output: string, 
+    source?: import("./types.js").CommandSource, 
+    sessionData?: SessionData
+  ): string {
+    // For WebSocket/browser commands (source: 'user'), apply aggressive command echo suppression
+    if (source === 'user' && sessionData?.currentCommand) {
+      return this.suppressWebSocketCommandEcho(output, sessionData.currentCommand.command);
+    } else if (source === 'system') {
+      // System output passes through unchanged to preserve formatting
+      return output;
+    } else {
+      // MCP commands and other sources get standard browser preparation
+      return this.prepareOutputForBrowser(output);
+    }
+  }
 
   private prepareOutputForBrowser(output: string): string {
     

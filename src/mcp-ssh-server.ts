@@ -7,6 +7,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { SSHConnectionManager } from "./ssh-connection-manager.js";
+import { TerminalSessionStateManager, SessionBusyError } from "./terminal-session-state-manager.js";
 import { Logger, log } from "./logger.js";
 
 export interface MCPSSHServerConfig {
@@ -51,6 +52,7 @@ interface SSHCancelCommandArgs {
 export class MCPSSHServer {
   private mcpServer: Server;
   private sshManager: SSHConnectionManager;
+  private terminalStateManager: TerminalSessionStateManager;
   private config: MCPSSHServerConfig;
   private mcpRunning = false;
   private webServerPort?: number;
@@ -58,6 +60,7 @@ export class MCPSSHServer {
   constructor(
     config: MCPSSHServerConfig = {},
     sshManager?: SSHConnectionManager,
+    terminalStateManager?: TerminalSessionStateManager,
   ) {
     this.validateConfig(config);
 
@@ -87,6 +90,9 @@ export class MCPSSHServer {
 
     // SSH manager - use shared instance or create new one
     this.sshManager = sshManager || new SSHConnectionManager(8080);
+    
+    // Terminal state manager - use shared instance or create new one
+    this.terminalStateManager = terminalStateManager || new TerminalSessionStateManager();
 
     this.setupMCPToolHandlers();
   }
@@ -416,51 +422,97 @@ export class MCPSSHServer {
 
     // Normal execution when buffer is empty
     
-    // EMERGENCY: CommandStateManager disabled - was destroying terminal output
-    // this.sshManager.trackCommandSubmission(sessionName, command);
-    
-    // CRITICAL FIX: Add MCP command to browser command buffer for cancellation tracking
-    const mcpCommandId = `mcp-cmd-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    this.sshManager.addBrowserCommand(sessionName, command, mcpCommandId, 'claude');
-    
-    try {
-      const result = await this.sshManager.executeCommand(sessionName, command, {
-        timeout,
-        source: 'claude',
-      });
-      
-      // Update browser command buffer with execution result
-      this.sshManager.updateBrowserCommandResult(sessionName, mcpCommandId, result);
-      
+    // STATE MACHINE: Check if session can accept new commands
+    if (!this.terminalStateManager.canAcceptCommand(sessionName)) {
+      const currentCommand = this.terminalStateManager.getCurrentCommand(sessionName);
+      const errorResponse = {
+        success: false,
+        error: 'SESSION_BUSY',
+        message: `Session is busy executing command: ${currentCommand?.command || 'unknown'} (initiated by ${currentCommand?.initiator || 'unknown'})`,
+        currentCommand
+      };
+
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify(
-              {
-                success: true,
-                result: {
-                  stdout: result.stdout,
-                  stderr: result.stderr,
-                  exitCode: result.exitCode,
-                },
-              },
-              null,
-              2,
-            ),
+            text: JSON.stringify(errorResponse, null, 2),
           },
         ],
       };
-    } catch (error) {
-      // Update browser command buffer with error result
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      this.sshManager.updateBrowserCommandResult(sessionName, mcpCommandId, {
-        stdout: '',
-        stderr: errorMessage,
-        exitCode: 1  // Non-zero exit code indicates error
-      });
+    }
+    
+    // Generate unique command ID
+    const mcpCommandId = `mcp-cmd-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    // CRITICAL FIX: Proper resource management pattern
+    try {
+      // STATE MACHINE: Start command execution
+      this.terminalStateManager.startCommandExecution(sessionName, command, mcpCommandId, 'mcp');
       
-      throw error;  // Re-throw to maintain existing error handling behavior
+      try {
+        // CRITICAL FIX: Add MCP command to browser command buffer for cancellation tracking
+        this.sshManager.addBrowserCommand(sessionName, command, mcpCommandId, 'claude');
+        
+        const result = await this.sshManager.executeCommand(sessionName, command, {
+          timeout,
+          source: 'claude',
+        });
+        
+        // Update browser command buffer with execution result
+        this.sshManager.updateBrowserCommandResult(sessionName, mcpCommandId, result);
+        
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  success: true,
+                  result: {
+                    stdout: result.stdout,
+                    stderr: result.stderr,
+                    exitCode: result.exitCode,
+                  },
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      } catch (error) {
+        // Update browser command buffer with error result
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        this.sshManager.updateBrowserCommandResult(sessionName, mcpCommandId, {
+          stdout: '',
+          stderr: errorMessage,
+          exitCode: 1  // Non-zero exit code indicates error
+        });
+        
+        throw error;  // Re-throw to maintain existing error handling behavior
+      } finally {
+        // CRITICAL: Always cleanup state, even if executeCommand throws
+        this.terminalStateManager.completeCommandExecution(sessionName, mcpCommandId);
+      }
+    } catch (stateError) {
+      // Handle state management errors (SessionBusyError, etc.)
+      if (stateError instanceof SessionBusyError) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                success: false,
+                error: 'SESSION_BUSY',
+                message: stateError.message
+              }, null, 2),
+            },
+          ],
+        };
+      } else {
+        throw stateError;  // Re-throw unexpected errors
+      }
     }
   }
 
@@ -659,6 +711,10 @@ export class MCPSSHServer {
 
   getSSHConnectionManager(): SSHConnectionManager {
     return this.sshManager;
+  }
+
+  getTerminalStateManager(): TerminalSessionStateManager {
+    return this.terminalStateManager;
   }
 
   async listTools(): Promise<string[]> {
