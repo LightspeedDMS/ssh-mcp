@@ -605,7 +605,14 @@ export class JestTestUtilities {
     const preWebSocketExecutor = new PreWebSocketCommandExecutor(mcpClient);
     const webSocketConnectionDiscovery = new WebSocketConnectionDiscovery(mcpClient);
     const initialHistoryReplayCapture = new InitialHistoryReplayCapture();
-    const postWebSocketCommandExecutor = new PostWebSocketCommandExecutor(mcpClient);
+    const postWebSocketCommandExecutor = new PostWebSocketCommandExecutor(
+      mcpClient, 
+      initialHistoryReplayCapture,
+      { 
+        sessionName: this.commandConfig?.getSessionName() || 'default-test-session',
+        commandTimeout: this.config.testTimeout
+      }
+    );
 
     // Inject all components into the response collector
     this.responseCollector.setServerManager(mcpServerManager);

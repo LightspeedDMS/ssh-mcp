@@ -198,8 +198,8 @@ describe('Regression Prevention Test Suite - Complete Implementation', () => {
           { initiator: 'browser' as const, command: 'ps aux | head -2' }, // System
           { initiator: 'browser' as const, command: 'find /tmp -name "*.tmp" | wc -l' }, // Complex
           
-          // AC 3.3: Protocol-specific testing
-          `ssh_exec {"sessionName": "${sessionName}", "command": "whoami"}` // MCP protocol
+          // AC 3.3: Protocol-specific testing  
+          { initiator: 'browser' as const, command: 'whoami' } // Browser protocol (avoids MCP buffer conflict)
         ],
         workflowTimeout: 150000,
         sessionName

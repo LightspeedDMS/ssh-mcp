@@ -52,6 +52,8 @@ export class WebSocketConnectionDiscovery {
   async discoverWebSocketUrl(sessionName: string): Promise<string> {
     let response: MonitoringUrlResponse;
     
+    console.debug(`[WebSocketConnectionDiscovery] Discovering WebSocket URL for session: ${sessionName}`);
+    
     try {
       // ✅ CLAUDE.md COMPLIANCE: Proper exception handling with specific catch
       // Call MCP tool to get monitoring URL
@@ -74,7 +76,9 @@ export class WebSocketConnectionDiscovery {
       }
 
       // Convert monitoring URL to WebSocket URL
-      return this.parseMonitoringUrl(response.monitoringUrl);
+      const webSocketUrl = this.parseMonitoringUrl(response.monitoringUrl);
+      console.debug(`[WebSocketConnectionDiscovery] Discovered WebSocket URL: ${webSocketUrl}`);
+      return webSocketUrl;
     } catch (error) {
       // Re-throw URL parsing errors as-is
       if (error instanceof Error && error.message.includes('Failed to discover monitoring URL')) {
@@ -159,6 +163,7 @@ export class WebSocketConnectionDiscovery {
       // Connection successful
       const onOpen = (): void => {
         try {
+          console.debug(`[WebSocketConnectionDiscovery] WebSocket connection established successfully to: ${webSocketUrl}`);
           cleanup(false); // Don't remove listeners from successful connection
           resolve(webSocket);
         } catch (cleanupError) {
