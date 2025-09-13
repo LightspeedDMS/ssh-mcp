@@ -370,12 +370,16 @@ export class PostWebSocketCommandExecutor {
       // Send WebSocket message - AC 2.1: Command-level browser emulation
       const messageStr = JSON.stringify(terminalInputMessage);
       
+      console.debug(`SENDING BROWSER COMMAND: ${command} (commandId: ${commandId}) to WebSocket`);
+      console.debug(`WEBSOCKET MESSAGE CONTENT:`, terminalInputMessage);
+      
       // Capture the WebSocket sent message for test verification - AC 2.5
       if (this.historyCapture) {
         this.historyCapture.captureWebSocketMessage('websocket_sent', terminalInputMessage);
       }
       
       this.currentWebSocket.send(messageStr);
+      console.debug(`WEBSOCKET SEND COMPLETE for ${commandId}`);
       
       // Wait for command completion - AC 2.6: Command completion detection
       await this.waitForCommandCompletion(commandId);
@@ -403,6 +407,7 @@ export class PostWebSocketCommandExecutor {
     return new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
         cleanup();
+        console.debug(`TIMEOUT: Browser command ${commandId} timed out after ${this.config.commandTimeout}ms - received ${messageCount} messages`);
         resolve(); // Complete after timeout - better than hanging indefinitely
       }, this.config.commandTimeout);
 
@@ -420,7 +425,7 @@ export class PostWebSocketCommandExecutor {
           }
           
           // Enhanced debugging for WebSocket messages
-          console.debug(`WebSocket message ${messageCount + 1} for ${commandId}: ${message.slice(0, 100)}...`);
+          console.debug(`WEBSOCKET MSG ${messageCount + 1} for ${commandId}: ${message.slice(0, 100)}...`);
           
           // CRITICAL FIX 1: Capture WebSocket received messages
           if (this.historyCapture) {

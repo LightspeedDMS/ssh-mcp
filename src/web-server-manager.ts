@@ -346,6 +346,7 @@ export class WebServerManager {
         const sessionMatch = url.pathname.match(/^\/ws\/session\/(.+)$/);
         if (sessionMatch) {
           const sessionName = decodeURIComponent(sessionMatch[1]);
+          console.debug(`[WebServerManager] Setting up WebSocket for session: ${sessionName}`);
           this.setupSessionWebSocket(ws, sessionName);
         }
       }
@@ -488,6 +489,7 @@ export class WebServerManager {
     data: unknown,
     sessionName: string
   ): Promise<void> {
+    console.debug(`[WebServerManager] handleTerminalInputMessage called for session: ${sessionName}`);
     try {
       // Type guard for data
       if (typeof data !== 'object' || data === null) {
@@ -498,7 +500,10 @@ export class WebServerManager {
       const messageData = data as Record<string, unknown>;
 
       // Validate session exists
-      if (!this.sshManager.hasSession(sessionName)) {
+      const sessionExists = this.sshManager.hasSession(sessionName);
+      console.debug(`[WebServerManager] Session ${sessionName} exists: ${sessionExists}`);
+      if (!sessionExists) {
+        console.debug(`[WebServerManager] Available sessions: ${JSON.stringify(this.sshManager.listSessions())}`);
         this.sendErrorResponse(ws, `Session '${sessionName}' not found`, 
           typeof messageData.commandId === 'string' ? messageData.commandId : undefined);
         return;
@@ -519,6 +524,8 @@ export class WebServerManager {
 
       const commandId = messageData.commandId as string;
       const command = messageData.command as string;
+      
+      console.debug(`[WebServerManager] Executing command: "${command}" (commandId: ${commandId}) for session: ${sessionName}`);
       
       // EMERGENCY: CommandStateManager disabled - was destroying terminal output
       // console.log(`[WebServerManager] Command submitted: "${command}" for session: ${sessionName}`);
