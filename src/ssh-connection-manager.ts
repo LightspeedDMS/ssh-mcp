@@ -17,6 +17,7 @@ import {
   BrowserCommandEntry,
 } from "./types.js";
 import { CommandStateManager } from "./command-state-manager.js";
+import { log } from "./logger.js";
 
 export interface ISSHConnectionManager {
   getTerminalHistory(sessionName: string): TerminalOutputEntry[];
@@ -126,7 +127,8 @@ export class SSHConnectionManager implements ISSHConnectionManager {
   private commandStateManager?: CommandStateManager;
 
   constructor(webServerPort: number = 8080) {
-    console.log('🏗️ SSH CONNECTION MANAGER CONSTRUCTED');
+    // CRITICAL FIX: Removed console.log that was polluting stdio MCP communication
+    // Original: console.log('🏗️ SSH CONNECTION MANAGER CONSTRUCTED');
     this.webServerPort = webServerPort;
   }
 
@@ -146,10 +148,10 @@ export class SSHConnectionManager implements ISSHConnectionManager {
    */
   trackCommandSubmission(sessionName: string, command: string): void {
     if (this.commandStateManager) {
-      console.log(`[SSHConnectionManager] Tracking command submission: "${command}" for session: ${sessionName}`);
+      log.debug(`Tracking command submission: "${command}" for session: ${sessionName}`, 'SSHConnectionManager');
       this.commandStateManager.onCommandSubmit(sessionName, command);
     } else {
-      console.log(`[SSHConnectionManager] No CommandStateManager available for command tracking: ${sessionName}`);
+      log.debug(`No CommandStateManager available for command tracking: ${sessionName}`, 'SSHConnectionManager');
     }
   }
 
@@ -220,10 +222,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       try {
         listener.callback(outputEntry);
       } catch (error) {
-        console.warn(
-          `Failed to notify terminal listener for session ${sessionName}:`,
-          error,
-        );
+        log.warn(`Failed to notify terminal listener for session ${sessionName}: ${error instanceof Error ? error.message : String(error)}`);
       }
     });
   }
@@ -425,7 +424,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
           if (!newData.includes('null 2>&1')) {
             initOutput += newData;
           } else {
-            console.log('🚫 Filtered out null 2>&1 during shell initialization');
+            log.debug('Filtered out null 2>&1 during shell initialization');
           }
 
           // Enhanced prompt detection with multiple patterns
@@ -1122,7 +1121,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
               clearTimeout(promptTimeout);
               stream.off('data', onData);
               
-              console.log('✅ Shell prompt detected, connection ready for commands');
+              log.debug('Shell prompt detected, connection ready for commands');
               
               // Shell is ready for commands
               resolve({
@@ -1138,7 +1137,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
           // Set up timeout for prompt detection
           promptTimeout = setTimeout(() => {
             stream.off('data', onData);
-            console.log('⚠️ Shell prompt not detected within timeout, proceeding anyway');
+            log.warn('Shell prompt not detected within timeout, proceeding anyway');
             
             // Proceed even without detected prompt - shell should still work
             resolve({
@@ -1211,7 +1210,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
    * Trigger nuclear fallback - terminate and re-establish SSH session with timeout protection
    */
   private async triggerNuclearFallback(sessionData: SessionData): Promise<void> {
-    console.log('☢️ NUCLEAR FALLBACK TRIGGERED for session:', sessionData.connection.name);
+    log.warn('NUCLEAR FALLBACK TRIGGERED for session:', sessionData.connection.name);
     
     if (!sessionData.nuclearFallback) {
       return;
@@ -1222,7 +1221,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     sessionData.nuclearFallback.lastFallbackReason = `Nuclear fallback triggered after ${sessionData.nuclearFallback.duration}ms timeout`;
 
     // Story 02: Actual SSH session termination and re-establishment
-    console.log('🔥 TERMINATING SSH CONNECTION for session:', sessionData.connection.name);
+    log.warn('TERMINATING SSH CONNECTION for session:', sessionData.connection.name);
     
     // Clear command buffers and state
     sessionData.browserCommandBuffer = [];
@@ -1263,12 +1262,12 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       sessionData.isShellReady = false;
       sessionData.initialPromptShown = false;
     } catch (error) {
-      console.log('⚠️ Error during SSH connection termination:', error);
+      log.warn('Error during SSH connection termination:', error instanceof Error ? error.message : String(error));
     }
 
     // Re-establish SSH connection with original configuration and timeout protection
     try {
-      console.log('🔄 RE-ESTABLISHING SSH CONNECTION for session:', originalConfig.name);
+      log.info('RE-ESTABLISHING SSH CONNECTION for session:', originalConfig.name);
       
       // Add timeout protection for nuclear fallback re-establishment
       const reestablishmentPromise = this.createNewSSHConnection(originalConfig);
@@ -1298,11 +1297,11 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       sessionData.lastCommandSent = undefined;
       sessionData.expectingCommandEcho = false;
       
-      console.log('✅ SSH CONNECTION RE-ESTABLISHED for session:', originalConfig.name);
+      log.info('SSH CONNECTION RE-ESTABLISHED for session:', originalConfig.name);
       sessionData.nuclearFallback.lastFallbackReason = `Nuclear fallback completed - session re-established after ${sessionData.nuclearFallback.duration}ms timeout`;
       
     } catch (error) {
-      console.log('❌ SSH CONNECTION RE-ESTABLISHMENT FAILED for session:', originalConfig.name, error);
+      log.error('SSH CONNECTION RE-ESTABLISHMENT FAILED for session: ' + originalConfig.name, error instanceof Error ? error : new Error(String(error)));
       const errorMessage = error instanceof Error ? error.message : String(error);
       sessionData.nuclearFallback.lastFallbackReason = `Nuclear fallback failed - reestablishment failed: ${errorMessage}`;
       
@@ -2091,7 +2090,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       if (commandEntry) {
         commandEntry.result = result;
       } else {
-        console.warn(`Command ID ${commandId} not found in buffer for session ${sessionName}`);
+        log.warn(`Command ID ${commandId} not found in buffer for session ${sessionName}`);
       }
     }
   }

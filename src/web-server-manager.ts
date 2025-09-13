@@ -5,6 +5,7 @@ import {
 import { ErrorResponse } from "./types.js";
 import { PortManager } from "./port-discovery.js";
 import { CommandStateManager } from "./command-state-manager.js";
+import { Logger, log } from "./logger.js";
 import * as http from "http";
 import express from "express";
 import { WebSocketServer } from "ws";
@@ -60,6 +61,9 @@ export class WebServerManager {
     this.sshManager = sshManager;
     this.portManager = new PortManager();
     this.commandStateManager = new CommandStateManager();
+    
+    // Initialize logger with 'file' transport for safe console output in web server context
+    Logger.initialize('file', 'WebServer', 'logs/web-server.log');
     
     // Inject CommandStateManager into SSH manager for echo suppression coordination
     this.sshManager.setCommandStateManager(this.commandStateManager);
@@ -228,14 +232,14 @@ export class WebServerManager {
         
         // CRITICAL FIX: Initialize terminal handler BEFORE WebSocket connection
         // This prevents race condition where messages arrive before handler is ready
-        console.log('DEBUG: About to create TerminalInputHandler...');
-        console.log('DEBUG: TerminalInputHandler available?', typeof TerminalInputHandler);
+        log.debug('About to create TerminalInputHandler...');
+        log.debug('TerminalInputHandler available: ' + typeof TerminalInputHandler);
         let terminalHandler;
         try {
             terminalHandler = new TerminalInputHandler(term, ws, sessionName);
-            console.log('DEBUG: TerminalInputHandler created successfully');
+            log.debug('TerminalInputHandler created successfully');
         } catch (error) {
-            console.error('CRITICAL ERROR: Failed to create TerminalInputHandler:', error);
+            log.error('CRITICAL ERROR: Failed to create TerminalInputHandler', error instanceof Error ? error : new Error(String(error)));
             terminalHandler = null;
         }
         
@@ -250,10 +254,10 @@ export class WebServerManager {
                 if (terminalHandler && terminalHandler.handleTerminalOutput) {
                     terminalHandler.handleTerminalOutput(data);
                 } else {
-                    console.error('CRITICAL: terminalHandler not available for message:', data);
+                    log.error('CRITICAL: terminalHandler not available for message: ' + JSON.stringify(data));
                 }
             } catch (error) {
-                console.error('Error processing WebSocket message:', error);
+                log.error('Error processing WebSocket message', error instanceof Error ? error : new Error(String(error)));
                 document.getElementById('connection-status').innerHTML = '⚠️ Message Error';
             }
         };
@@ -263,7 +267,7 @@ export class WebServerManager {
         };
         
         ws.onerror = function(error) {
-            console.error('WebSocket error:', error);
+            log.error('WebSocket error', error instanceof Error ? error : new Error(String(error)));
             document.getElementById('connection-status').innerHTML = '⚠️ Connection Error';
         };
         
@@ -404,7 +408,7 @@ export class WebServerManager {
           let data: unknown;
           try {
             data = JSON.parse(message.toString());
-            console.log('DEBUG: SERVER received WebSocket message:', JSON.stringify(data));
+            log.debug('SERVER received WebSocket message: ' + JSON.stringify(data));
             
             if (typeof data === 'object' && data !== null && 
                 'type' in data && 'sessionName' in data) {
@@ -425,16 +429,13 @@ export class WebServerManager {
               }
             }
           } catch (error) {
-            console.error("Error processing WebSocket message:", error);
+            log.error('Error processing WebSocket message', error instanceof Error ? error : new Error(String(error)));
             this.handleMalformedMessage(ws, sessionName);
           }
         });
       } catch (error) {
         // Handle listener setup errors gracefully - log but don't crash
-        console.error(
-          "Error setting up terminal output listener:",
-          error instanceof Error ? error.message : String(error),
-        );
+        log.error('Error setting up terminal output listener', error instanceof Error ? error : new Error(String(error)));
       }
     }
   }
@@ -476,10 +477,7 @@ export class WebServerManager {
 
     await Promise.all(cleanupPromises).catch((error) => {
       // Log cleanup errors but don't throw - cleanup should be graceful
-      console.error(
-        "Error during web server cleanup:",
-        error instanceof Error ? error.message : String(error),
-      );
+      log.error('Error during web server cleanup', error instanceof Error ? error : new Error(String(error)));
     });
 
     this.running = false;
@@ -935,7 +933,7 @@ export class WebServerManager {
       // Get session connection info for prompt construction
       const connectionInfo = this.sshManager.getSessionConnectionInfo(sessionName);
       if (!connectionInfo) {
-        console.warn(`Cannot get connection info for ${sessionName} - using fallback prompt format`);
+        log.warn(`Cannot get connection info for ${sessionName} - using fallback prompt format`);
         // Fall back to simple history replay if connection info unavailable
         terminalHistory.forEach((entry) => {
           if (ws.readyState === ws.OPEN) {
@@ -984,7 +982,7 @@ export class WebServerManager {
       });
 
     } catch (error) {
-      console.error(`Error sending formatted terminal history for session ${sessionName}:`, error);
+      log.error(`Error sending formatted terminal history for session ${sessionName}`, error instanceof Error ? error : new Error(String(error)));
       // Graceful degradation - fall back to simple terminal history
       const terminalHistory = this.sshManager.getTerminalHistory(sessionName);
       terminalHistory.forEach((entry) => {
