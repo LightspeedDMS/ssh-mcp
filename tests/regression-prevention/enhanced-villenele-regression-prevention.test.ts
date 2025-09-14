@@ -52,7 +52,7 @@ describe('Enhanced Villenele Functionality Regression Prevention', () => {
         postWebSocketCommands: [
           { initiator: 'browser' as const, command: 'pwd' },
           { initiator: 'browser' as const, command: 'whoami', cancel: false },
-          { initiator: 'browser' as const, command: 'date', cancel: false, waitToCancelMs: 0 }
+          { initiator: 'browser' as const, command: 'date', cancel: false, waitToCancelMs: 100 }
         ],
         workflowTimeout: 45000,
         sessionName
