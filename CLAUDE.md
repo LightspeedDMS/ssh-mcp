@@ -368,3 +368,4 @@ node scripts/headless-terminal-test.cjs http://localhost:8081/session/my-session
 
 ### Integration with MCP Workflow
 Perfect for validating echo suppression fixes and browser terminal functionality after making changes to WebSocket message processing or terminal display logic.
+- Any time I ask you to commit and push, either by telling you, or by using the /commit-all command and then I ask  you to push, you will watch for the regression testing job in github using the gh command. If there's any regression you will fetch the failure information, you will immediately troubleshoot the problem, fix it with the tdd-engineer and the code-reviewer and proceed to commit (github and gitlab) and monitor again. You will execute this loop until we have a clean run.

@@ -40,8 +40,14 @@ fi
 
 # Build the project (compile TypeScript to JavaScript)
 echo -e "${YELLOW}Building project (compiling TypeScript to JavaScript)...${NC}"
-echo "  • Compiling TypeScript files with tsc"
+echo "  • Compiling server-side TypeScript files with tsc"
+echo "  • Compiling browser-side TypeScript files"
 echo "  • Copying static files to dist/"
+if ! npm run build:client; then
+    echo -e "${RED}Error: Failed to build browser-side TypeScript files${NC}"
+    echo "Make sure TypeScript is properly installed and configured"
+    exit 1
+fi
 if ! npm run build; then
     echo -e "${RED}Error: Failed to build project${NC}"
     echo "Make sure TypeScript is properly installed and configured"
@@ -98,10 +104,10 @@ done
 
 echo -e "${GREEN}✅ Discovered available port: $DISCOVERED_PORT${NC}"
 
-# Install the MCP server with the discovered port
-echo -e "${YELLOW}Installing SSH MCP server with port $DISCOVERED_PORT...${NC}"
+# Install the MCP server globally with the discovered port
+echo -e "${YELLOW}Installing SSH MCP server globally with port $DISCOVERED_PORT...${NC}"
 
-claude mcp add ssh node "$(pwd)/dist/src/mcp-server.js" -e WEB_PORT=$DISCOVERED_PORT
+claude mcp add --scope user ssh node "$(pwd)/dist/src/mcp-server.js" -e WEB_PORT=$DISCOVERED_PORT
 
 if [ $? -eq 0 ]; then
     echo ""
@@ -115,10 +121,11 @@ if [ $? -eq 0 ]; then
     echo "  ✅ Dynamic port discovery and assignment"
     echo ""
     echo -e "${GREEN}Configuration:${NC}"
-    echo "  • MCP Server: ssh"
+    echo "  • MCP Server: ssh (global user scope)"
     echo "  • Script: $(pwd)/dist/src/mcp-server.js"
     echo "  • Web Port: $DISCOVERED_PORT"
     echo "  • Monitoring URL: http://localhost:$DISCOVERED_PORT/session/{session-name}"
+    echo "  • Scope: user (available globally in all projects)"
     echo ""
     echo -e "${YELLOW}Next Steps:${NC}"
     echo "1. Start using SSH tools in Claude Code (server starts automatically)"
