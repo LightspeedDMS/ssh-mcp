@@ -496,7 +496,7 @@ describe('Enhanced Villenele Functionality Regression Prevention', () => {
       // Test: Environment variables should be resolved correctly
       const userValue = process.env.USER || 'testuser';
       const values = await environmentProvider.getValues();
-      const pwdValue = values.pwd;
+      const pwdValue = values.PWD; // Note: uppercase PWD from EnvironmentValues interface
       
       // Environment variable resolution regression: USER resolved correctly check
       expect(userValue).toBe(process.env.USER || 'runner');
