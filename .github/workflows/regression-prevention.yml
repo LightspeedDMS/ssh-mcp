@@ -9,11 +9,6 @@ on:
   # Execute on every push to main/master branch
   push:
     branches: [ main, master ]
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - 'package.json'
-      - 'package-lock.json'
 
   # Manual workflow dispatch for testing
   workflow_dispatch:
