@@ -81,7 +81,9 @@
     ],
     "testTimeout": 30000,
     "forceExit": true,
-    "detectOpenHandles": true
+    "detectOpenHandles": true,
+    "maxConcurrency": 1,
+    "workerIdleMemoryLimit": "512MB"
   },
   "keywords": [
     "ssh",
