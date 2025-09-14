@@ -368,4 +368,24 @@ node scripts/headless-terminal-test.cjs http://localhost:8081/session/my-session
 
 ### Integration with MCP Workflow
 Perfect for validating echo suppression fixes and browser terminal functionality after making changes to WebSocket message processing or terminal display logic.
+
+## GitHub Actions Regression Testing - Performance Metrics
+
+### Average Runtime Analysis
+Based on successful regression testing workflow runs:
+
+- **Typical Runtime**: 5-6 minutes (5m39s - 5m51s observed)
+- **Workflow Components**:
+  - Setup (checkout, Node.js, dependencies): ~1-2 minutes
+  - SSH localhost setup: ~30-60 seconds
+  - Comprehensive regression tests: ~3-4 minutes
+  - Performance regression checks: ~30 seconds
+
+### Monitoring Workflow
 - Any time I ask you to commit and push, either by telling you, or by using the /commit-all command and then I ask  you to push, you will watch for the regression testing job in github using the gh command. If there's any regression you will fetch the failure information, you will immediately troubleshoot the problem, fix it with the tdd-engineer and the code-reviewer and proceed to commit (github and gitlab) and monitor again. You will execute this loop until we have a clean run.
+
+### Performance Benchmarks
+- **Expected Total Time**: ~6 minutes for clean runs
+- **Timeout Threshold**: 25 minutes (configured in workflow)
+- **Success Pattern**: Consistent 5-6 minute runtimes indicate healthy test suite
+- **Investigation Triggers**: Runtimes >8 minutes or failures require analysis
