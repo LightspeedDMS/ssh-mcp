@@ -100,7 +100,7 @@ describe('Test Suite Maintenance and Evolution', () => {
         sessionNaming: /^[a-z-]+-session$/,
         commandStructure: {
           browser: { initiator: 'browser', command: expect.any(String) },
-          mcp: expect.stringMatching(/ssh_exec.*sessionName.*command/)
+          mcp: /ssh_exec.*sessionName.*command/
         },
         timeoutRange: { min: 30000, max: 300000 },
         validationStructure: {
