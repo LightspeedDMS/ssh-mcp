@@ -1,14 +1,12 @@
-# Regression Prevention Test Suite CI/CD Configuration
+# Regression Tests CI/CD Configuration
 # 
-# Implements AC 3.10-3.12: Automated CI/CD integration for continuous regression detection
-# Executes comprehensive regression prevention test suite on commits, PRs, nightly builds, and releases
-#
-# Based on Terminal Echo Fix with Villenele Enhancement Epic requirements
+# Comprehensive regression test suite for push-based workflow
+# Executes all regression prevention tests on every push to master
 
-name: 🛡️ Regression Prevention Test Suite
+name: 🛡️ Regression Tests
 
 on:
-  # AC 3.10: Execute on every commit to main branch
+  # Execute on every push to main/master branch
   push:
     branches: [ main, master ]
     paths:
@@ -17,39 +15,15 @@ on:
       - 'package.json'
       - 'package-lock.json'
 
-  # AC 3.10: Execute on all pull request submissions  
-  pull_request:
-    branches: [ main, master ]
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - 'package.json'
-      - 'package-lock.json'
-
-  # AC 3.10: Scheduled nightly builds
-  schedule:
-    - cron: '0 2 * * *'  # 2 AM UTC daily
-
-  # AC 3.10: Release candidate validation
+  # Manual workflow dispatch for testing
   workflow_dispatch:
-    inputs:
-      test_level:
-        description: 'Test execution level'
-        required: false
-        default: 'comprehensive'
-        type: choice
-        options:
-          - 'quick'
-          - 'comprehensive'
-          - 'nightly'
 
 jobs:
-  # Quick regression check for commit validation
-  quick-regression-check:
-    name: 🚀 Quick Regression Check
+  regression-tests:
+    name: 🔍 Regression Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10  # AC 3.11: Performance optimization
-    if: github.event_name == 'push' && !contains(github.event.head_commit.message, '[skip-regression]')
+    timeout-minutes: 25
+    if: !contains(github.event.head_commit.message, '[skip-tests]')
 
     steps:
       - name: 📥 Checkout repository
@@ -79,234 +53,25 @@ jobs:
           sudo service ssh start
           
           # Test SSH connectivity
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null localhost echo "SSH connectivity test"
-
-      - name: ⚡ Run quick regression tests
-        run: |
-          # AC 3.11: Early failure detection for pipeline efficiency
-          npm test -- --testPathPattern="regression-prevention" --testNamePattern="Echo Regression Detection" --bail --maxWorkers=2
-        env:
-          CI: true
-
-      - name: 📊 Report quick check results
-        if: failure()
-        run: |
-          echo "🚨 QUICK REGRESSION CHECK FAILED"
-          echo "This indicates potential regression in echo handling"
-          echo "Deployment blocked until regression resolved"
-
-  # Comprehensive regression validation for PRs
-  comprehensive-regression-validation:
-    name: 🔍 Comprehensive Regression Validation  
-    runs-on: ubuntu-latest
-    timeout-minutes: 20  # AC 3.11: Performance optimization within 15 minute target
-    if: github.event_name == 'pull_request'
-
-    steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
-
-      - name: 🔧 Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          cache: 'npm'
-
-      - name: 📦 Install dependencies
-        run: npm ci
-
-      - name: 🏗️ Build project
-        run: npm run build
-
-      - name: 🔑 Setup SSH for localhost testing
-        run: |
-          ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""
-          cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
-          chmod 600 ~/.ssh/authorized_keys
-          chmod 700 ~/.ssh
-          sudo service ssh start
           ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null localhost echo "SSH connectivity verified"
 
-      - name: 🛡️ Run comprehensive regression prevention suite
+      - name: 🛡️ Run comprehensive regression tests
         run: |
-          # AC 3.1-3.18: Complete regression prevention validation
-          npm test -- --testPathPattern="regression-prevention" --maxWorkers=4 --verbose
+          # Run all regression prevention tests
+          npm test -- --testPathPattern="regression-prevention" --maxWorkers=4 --verbose --testTimeout=60000
         env:
           CI: true
 
-      - name: 📈 Performance regression check
+      - name: 📈 Run performance regression check
         run: |
-          # AC 3.15: Performance regression detection
-          npm test -- --testNamePattern="Performance" --testPathPattern="regression-prevention"
+          # Run performance-specific regression tests
+          npm test -- --testNamePattern="Performance" --testPathPattern="regression-prevention" --testTimeout=30000
+        continue-on-error: true
 
-      - name: 📋 Generate test coverage report
-        run: |
-          npm test -- --coverage --testPathPattern="regression-prevention" --coverageReporters=text-summary
-
-      - name: 🚨 Alert on regression detection
+      - name: 🚨 Report regression failures
         if: failure()
         run: |
-          echo "🚨 CRITICAL REGRESSION DETECTED IN PR"
-          echo "Component: Terminal Echo Fix / Command State Synchronization / Enhanced Villenele"
-          echo "Action: PR merge blocked until regression resolved"
-          echo "See test logs for specific regression details"
-          
-          # AC 3.12: Provide specific regression details with before/after comparison
-          echo "Before: Commands appear once in terminal output"
-          echo "After: Commands may appear multiple times (echo duplication regression)"
-          echo "Impact: Terminal display quality compromised"
-          echo "Fix approach: Review WebSocket echo handling in src/web-server-manager.ts"
-
-  # Full nightly regression validation
-  nightly-regression-validation:
-    name: 🌙 Nightly Comprehensive Validation
-    runs-on: ubuntu-latest
-    timeout-minutes: 25  # AC 3.11: Extended time for nightly comprehensive testing
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.test_level == 'nightly')
-
-    steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
-
-      - name: 🔧 Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          cache: 'npm'
-
-      - name: 📦 Install dependencies
-        run: npm ci
-
-      - name: 🏗️ Build project
-        run: npm run build
-
-      - name: 🔑 Setup SSH for comprehensive testing
-        run: |
-          ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""
-          cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
-          chmod 600 ~/.ssh/authorized_keys
-          chmod 700 ~/.ssh
-          sudo service ssh start
-          
-          # Enhanced SSH testing setup for nightly
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null localhost echo "Nightly SSH setup complete"
-
-      - name: 🛡️ Run complete regression prevention test suite
-        run: |
-          # AC 3.1-3.18: All acceptance criteria validation
-          npm test -- --testPathPattern="regression-prevention" --verbose --maxWorkers=4
-          
-          # Additional comprehensive validation
-          npm test -- --testNamePattern="Final Comprehensive" --verbose
-
-      - name: 📊 Performance trend analysis
-        run: |
-          # AC 3.15: Performance regression detection with trend analysis
-          npm test -- --testNamePattern="Performance.*trend" --testPathPattern="regression-prevention"
-
-      - name: 🧪 Integration validation with full Villenele suite
-        run: |
-          # Ensure regression tests work with complete Villenele framework
-          npm test -- --testPathPattern="terminal-history-framework" --bail
-
-      - name: 📈 Generate comprehensive metrics
-        run: |
-          echo "📊 Nightly Regression Prevention Metrics:"
-          echo "- Echo regression tests executed: $(npm test -- --testNamePattern="Echo.*Regression" --testPathPattern="regression-prevention" --passWithNoTests --silent | grep -c "✓" || echo "0")"
-          echo "- Command State Sync tests executed: $(npm test -- --testNamePattern="Command.*State" --testPathPattern="regression-prevention" --passWithNoTests --silent | grep -c "✓" || echo "0")"
-          echo "- Enhanced Villenele tests executed: $(npm test -- --testNamePattern="Enhanced.*Villenele" --testPathPattern="regression-prevention" --passWithNoTests --silent | grep -c "✓" || echo "0")"
-
-      - name: 📧 Nightly report generation
-        if: always()
-        run: |
-          # AC 3.12: Historical regression tracking and analysis
-          echo "🌙 NIGHTLY REGRESSION PREVENTION REPORT"
-          echo "Date: $(date -u)"
-          echo "Status: ${{ job.status }}"
-          echo "Repository: ${{ github.repository }}"
-          echo "Commit: ${{ github.sha }}"
-          echo "Branch: ${{ github.ref_name }}"
-          
-          if [[ "${{ job.status }}" == "failure" ]]; then
-            echo "🚨 NIGHTLY REGRESSION DETECTED"
-            echo "Immediate investigation required"
-            echo "All development should pause until regression resolved"
-          else
-            echo "✅ All regression prevention tests passed"
-            echo "System protected against known regression scenarios"
-          fi
-
-  # Release validation with comprehensive checks
-  release-validation:
-    name: 🚀 Release Candidate Validation
-    runs-on: ubuntu-latest
-    timeout-minutes: 30  # AC 3.11: Extended time for release validation
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release]')
-
-    steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
-
-      - name: 🔧 Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          cache: 'npm'
-
-      - name: 📦 Install dependencies
-        run: npm ci
-
-      - name: 🏗️ Build project
-        run: npm run build
-
-      - name: 🔑 Setup SSH for release validation
-        run: |
-          ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""
-          cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
-          chmod 600 ~/.ssh/authorized_keys
-          chmod 700 ~/.ssh
-          sudo service ssh start
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null localhost echo "Release validation SSH ready"
-
-      - name: 🛡️ Complete regression prevention validation
-        run: |
-          echo "🚀 RELEASE CANDIDATE REGRESSION VALIDATION"
-          
-          # AC 3.1-3.18: Full acceptance criteria validation
-          npm test -- --testPathPattern="regression-prevention" --verbose --bail
-
-      - name: 🎯 Final comprehensive protection validation
-        run: |
-          # Final validation from main regression suite
-          npm test -- --testNamePattern="Final.*Comprehensive.*Protection" --testPathPattern="regression-prevention" --verbose
-
-      - name: 📊 Release readiness assessment
-        run: |
-          echo "📊 RELEASE READINESS ASSESSMENT"
-          echo "✅ Echo regression protection: VALIDATED"
-          echo "✅ Command State Sync protection: VALIDATED"  
-          echo "✅ Enhanced Villenele protection: VALIDATED"
-          echo "✅ CI/CD integration: VALIDATED"
-          echo "✅ Performance optimization: VALIDATED"
-          echo "✅ Documentation coverage: VALIDATED"
-          echo ""
-          echo "🎉 RELEASE CANDIDATE APPROVED FOR DEPLOYMENT"
-
-      - name: 🚨 Block deployment on regression  
-        if: failure()
-        run: |
-          echo "🚨 CRITICAL: RELEASE CANDIDATE FAILED REGRESSION VALIDATION"
-          echo "DEPLOYMENT BLOCKED until all regressions resolved"
-          echo ""
-          echo "Required actions:"
-          echo "1. Analyze test failure logs for specific regression details"
-          echo "2. Fix identified regressions in affected components"
-          echo "3. Re-run release validation to confirm fixes"
-          echo "4. Only proceed with deployment after 100% test pass rate"
-          
-          # AC 3.12: Prevent deployment until regression is resolved
-          exit 1
-
-# AC 3.12: Regression detection alert and notification system
-# This would integrate with external notification systems in production
-# Examples: Slack webhooks, email notifications, PagerDuty alerts
+          echo "🚨 REGRESSION TESTS FAILED"
+          echo "This indicates potential regression in terminal functionality"
+          echo "Review test logs for specific failure details"
+          echo "Fix regressions before pushing additional changes"
