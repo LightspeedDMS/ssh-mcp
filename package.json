@@ -83,7 +83,8 @@
     "forceExit": true,
     "detectOpenHandles": true,
     "maxConcurrency": 1,
-    "workerIdleMemoryLimit": "512MB"
+    "workerIdleMemoryLimit": "512MB",
+    "bail": 1
   },
   "keywords": [
     "ssh",

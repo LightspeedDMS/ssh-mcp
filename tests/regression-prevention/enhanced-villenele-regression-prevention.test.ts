@@ -704,8 +704,12 @@ describe('Enhanced Villenele Functionality Regression Prevention', () => {
         const keys = path.split('.');
         return keys.reduce((obj: any, key: string) => obj?.[key], process.env) || '';
       });
+
+      // CI Environment Handling: Handle case where USER is undefined
+      const expectedUser = process.env.USER || '';
+
       // Dynamic value construction regression: Valid templates working check
-      expect(validTemplate).toBe(process.env.USER);
+      expect(validTemplate).toBe(expectedUser);
     });
   });
 });
