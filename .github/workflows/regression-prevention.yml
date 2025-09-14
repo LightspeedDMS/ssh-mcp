@@ -19,11 +19,11 @@ on:
   workflow_dispatch:
 
 jobs:
-  regression-tests:
-    name: 🔍 Regression Tests
+  regression_tests:
+    name: "Regression Tests"
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    if: !contains(github.event.head_commit.message, '[skip-tests]')
+    if: "!contains(github.event.head_commit.message, '[skip-tests]')"
 
     steps:
       - name: 📥 Checkout repository
