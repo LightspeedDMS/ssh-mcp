@@ -142,7 +142,7 @@ describe('Regression Prevention Test Suite - Complete Implementation', () => {
         await testUtils.runTerminalHistoryTest(mcpGatingConfig);
         
         // If we reach here, gating failed
-        fail(
+        throw new Error(
           '🚨 COMMAND STATE SYNC REGRESSION DETECTED: MCP command executed when should be gated. ' +
           'Browser commands in buffer but MCP gating not working.'
         );
@@ -169,7 +169,7 @@ describe('Regression Prevention Test Suite - Complete Implementation', () => {
         postWebSocketCommands: [
           // Enhanced parameter structure with all optional parameters
           { initiator: 'browser' as const, command: 'pwd', cancel: false },
-          { initiator: 'browser' as const, command: 'whoami', cancel: false, waitToCancelMs: 0 },
+          { initiator: 'browser' as const, command: 'whoami', cancel: false, waitToCancelMs: 100 },
           
           // Mixed browser and MCP commands (dual-channel execution)
           `ssh_exec {"sessionName": "${sessionName}", "command": "echo mcp-villenele-test"}`,
@@ -303,7 +303,7 @@ describe('Regression Prevention Test Suite - Complete Implementation', () => {
 
         await testUtils.runTerminalHistoryTest(mcpGatingConfig);
         
-        fail('AC 3.5 FAILURE: MCP command not gated when browser commands in buffer');
+        throw new Error('AC 3.5 FAILURE: MCP command not gated when browser commands in buffer');
       } catch (error) {
         expect(String(error)).toMatch(/(BROWSER_COMMANDS_EXECUTED|gated)/i);
       }
@@ -348,7 +348,7 @@ describe('Regression Prevention Test Suite - Complete Implementation', () => {
           // AC 3.7: Enhanced parameter structure validation
           { initiator: 'browser' as const, command: 'pwd' }, // Basic structure
           { initiator: 'browser' as const, command: 'whoami', cancel: false }, // With cancel parameter
-          { initiator: 'browser' as const, command: 'date', cancel: false, waitToCancelMs: 0 }, // Full structure
+          { initiator: 'browser' as const, command: 'date', cancel: false, waitToCancelMs: 100 }, // Full structure
           
           // AC 3.8: Dual-channel execution
           `ssh_exec {"sessionName": "${sessionName}", "command": "hostname"}`, // MCP channel
@@ -406,7 +406,7 @@ describe('Regression Prevention Test Suite - Complete Implementation', () => {
       const regressionFound = !result.concatenatedResponses.includes('ci-cd-integration-test');
       if (regressionFound) {
         console.log('🚨 AC 3.12: Regression alert would be triggered');
-        fail('AC 3.12: CI/CD regression detection alert triggered');
+        throw new Error('AC 3.12: CI/CD regression detection alert triggered');
       }
       
       console.log('✅ AC 3.10-3.12 validated successfully');
@@ -540,7 +540,9 @@ describe('Regression Prevention Test Suite - Complete Implementation', () => {
         }
       }
       
-      // 🚨 FINAL VALIDATION: ${totalRegressions} echo regressions detected - checking Terminal Echo Fix regression prevention
+      if (totalRegressions > 0) {
+        throw new Error(`🚨 FINAL VALIDATION: ${totalRegressions} echo regressions detected - Terminal Echo Fix regression prevention failed`);
+      }
       expect(totalRegressions).toBe(0);
       
       console.log('✅ FINAL VALIDATION PASSED: Complete Terminal Echo Fix regression protection confirmed');
@@ -588,7 +590,9 @@ describe('Regression Prevention Test Suite - Complete Implementation', () => {
         gatingWorking = String(error).includes('BROWSER_COMMANDS_EXECUTED');
       }
       
-      // 🚨 FINAL VALIDATION: Command State Synchronization gating working check - MCP commands properly gated when browser commands in buffer
+      if (!gatingWorking) {
+        throw new Error('🚨 FINAL VALIDATION: Command State Synchronization gating working check failed - MCP commands not properly gated when browser commands in buffer');
+      }
       expect(gatingWorking).toBe(true);
       
       console.log('✅ FINAL VALIDATION PASSED: Complete Command State Sync regression protection confirmed');
@@ -610,7 +614,7 @@ describe('Regression Prevention Test Suite - Complete Implementation', () => {
           // Enhanced parameter structure
           { initiator: 'browser' as const, command: 'pwd' },
           { initiator: 'browser' as const, command: 'whoami', cancel: false },
-          { initiator: 'browser' as const, command: 'date', cancel: false, waitToCancelMs: 0 },
+          { initiator: 'browser' as const, command: 'date', cancel: false, waitToCancelMs: 100 },
           
           // Dual-channel execution
           `ssh_exec {"sessionName": "${sessionName}", "command": "hostname"}`,
@@ -635,11 +639,18 @@ describe('Regression Prevention Test Suite - Complete Implementation', () => {
         dynamicConstruction: result.concatenatedResponses.length > 100 // Evidence of dynamic processing
       };
 
-      // 🚨 Enhanced parameter structure regression check
+      if (!validationResults.enhancedParameters) {
+        throw new Error('🚨 Enhanced parameter structure regression detected');
+      }
+      if (!validationResults.dualChannel) {
+        throw new Error('🚨 Dual-channel execution regression detected');
+      }
+      if (!validationResults.dynamicConstruction) {
+        throw new Error('🚨 Dynamic expected value construction regression detected');
+      }
+      
       expect(validationResults.enhancedParameters).toBe(true);
-      // 🚨 Dual-channel execution regression check  
       expect(validationResults.dualChannel).toBe(true);
-      // 🚨 Dynamic expected value construction regression check
       expect(validationResults.dynamicConstruction).toBe(true);
       
       console.log('✅ FINAL VALIDATION PASSED: Complete Enhanced Villenele regression protection confirmed');

@@ -360,7 +360,7 @@ describe('AC X.Y: New Regression Protection', () => {
       
       // Test: Local development workflow should work as documented
       if (!result.concatenatedResponses.includes('local-dev-integration-test')) {
-        fail('Local development workflow validation failed');
+        throw new Error('Local development workflow validation failed');
       }
       expect(result.concatenatedResponses).toContain('local-dev-integration-test');
 
@@ -623,12 +623,12 @@ describe('AC X.Y: New Regression Protection', () => {
       
       // Test: Local development tests should be fast enough for regular use
       if (executionTime >= 30000) {
-        fail(`Local development test too slow: ${executionTime}ms exceeds 30 second limit`);
+        throw new Error(`Local development test too slow: ${executionTime}ms exceeds 30 second limit`);
       }
       expect(executionTime).toBeLessThan(30000);
       
       if (!result.concatenatedResponses.includes('local-workflow-test')) {
-        fail('Local development workflow test failed');
+        throw new Error('Local development workflow test failed');
       }
       expect(result.concatenatedResponses).toContain('local-workflow-test');
       
@@ -713,7 +713,7 @@ describe('AC X.Y: New Regression Protection', () => {
       
       // Test: PR integration should complete within acceptable time
       if (prExecutionTime >= 90000) {
-        fail(`PR integration test too slow: ${prExecutionTime}ms`);
+        throw new Error(`PR integration test too slow: ${prExecutionTime}ms`);
       }
       expect(prExecutionTime).toBeLessThan(90000);
       
@@ -799,7 +799,7 @@ describe('AC X.Y: New Regression Protection', () => {
       
       // Test: Release validation should complete within reasonable time
       if (releaseExecutionTime >= 240000) {
-        fail(`Release validation too slow: ${releaseExecutionTime}ms`);
+        throw new Error(`Release validation too slow: ${releaseExecutionTime}ms`);
       }
       expect(releaseExecutionTime).toBeLessThan(240000);
       
@@ -884,12 +884,12 @@ describe('AC X.Y: New Regression Protection', () => {
       
       // Test: Rapid feedback should be truly rapid
       if (feedbackTime >= 15000) {
-        fail(`Rapid feedback too slow: ${feedbackTime}ms exceeds rapid feedback threshold`);
+        throw new Error(`Rapid feedback too slow: ${feedbackTime}ms exceeds rapid feedback threshold`);
       }
       expect(feedbackTime).toBeLessThan(15000);
       
       if (!result.concatenatedResponses.includes('rapid-feedback-test')) {
-        fail('Rapid feedback test failed');
+        throw new Error('Rapid feedback test failed');
       }
       expect(result.concatenatedResponses).toContain('rapid-feedback-test');
 

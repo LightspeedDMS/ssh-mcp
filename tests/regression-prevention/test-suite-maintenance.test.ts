@@ -67,7 +67,7 @@ describe('Test Suite Maintenance and Evolution', () => {
       
       // Test: New functionality should integrate seamlessly
       if (!result.concatenatedResponses.includes('new-feature-test')) {
-        fail('Test suite extensibility failed: New functionality test template not working');
+        throw new Error('Test suite extensibility failed: New functionality test template not working');
       }
       expect(result.concatenatedResponses).toContain('new-feature-test');
       
@@ -398,7 +398,7 @@ describe('Test Suite Maintenance and Evolution', () => {
       
       // Test: Should achieve comprehensive coverage (>90%)
       if (coverageAnalysis.overallCoverage <= 90) {
-        fail(`Comprehensive coverage insufficient: ${coverageAnalysis.overallCoverage}% < 90%`);
+        throw new Error(`Comprehensive coverage insufficient: ${coverageAnalysis.overallCoverage}% < 90%`);
       }
       expect(coverageAnalysis.overallCoverage).toBeGreaterThan(90);
 
@@ -489,17 +489,17 @@ describe('Test Suite Maintenance and Evolution', () => {
       
       // Test: Should minimize false detection rates
       if (falsePositiveRate >= 10) {
-        fail(`False positive rate too high: ${falsePositiveRate}%`);
+        throw new Error(`False positive rate too high: ${falsePositiveRate}%`);
       }
       expect(falsePositiveRate).toBeLessThan(10);
       
       if (falseNegativeRate >= 5) {
-        fail(`False negative rate too high: ${falseNegativeRate}%`);
+        throw new Error(`False negative rate too high: ${falseNegativeRate}%`);
       }
       expect(falseNegativeRate).toBeLessThan(5);
       
       if (accuracy <= 85) {
-        fail(`Detection accuracy too low: ${accuracy}%`);
+        throw new Error(`Detection accuracy too low: ${accuracy}%`);
       }
       expect(accuracy).toBeGreaterThan(85);
     });
@@ -553,14 +553,14 @@ describe('Test Suite Maintenance and Evolution', () => {
       // Test: Without regression injection
       const normalDetection = await regressionInjectionTest(false);
       if (normalDetection !== false) {
-        fail('False positive: Normal execution detected as regression');
+        throw new Error('False positive: Normal execution detected as regression');
       }
       expect(normalDetection).toBe(false);
       
       // Test: With regression injection
       const regressionDetection = await regressionInjectionTest(true);
       if (regressionDetection !== true) {
-        fail('False negative: Deliberate regression not detected');
+        throw new Error('False negative: Deliberate regression not detected');
       }
       expect(regressionDetection).toBe(true);
 
@@ -612,13 +612,13 @@ describe('Test Suite Maintenance and Evolution', () => {
       
       // Test: Performance should be within acceptable range
       if (performanceAnalysis.performanceRegressionDetected !== false) {
-        fail(`Performance regression detected: ${performanceAnalysis.regressionPercentage}% degradation`);
+        throw new Error(`Performance regression detected: ${performanceAnalysis.regressionPercentage}% degradation`);
       }
       expect(performanceAnalysis.performanceRegressionDetected).toBe(false);
       
       // Test: Baseline time should be reasonable
       if (baselineTime >= 30000) {
-        fail(`Baseline execution time too slow: ${baselineTime}ms`);
+        throw new Error(`Baseline execution time too slow: ${baselineTime}ms`);
       }
       expect(baselineTime).toBeLessThan(30000);
 
@@ -660,7 +660,7 @@ describe('Test Suite Maintenance and Evolution', () => {
       
       // Test: Memory growth should be within acceptable limits
       if (memoryAnalysis.memoryLeakDetected !== false) {
-        fail(`Memory leak detected: ${Math.round(memoryAnalysis.memoryGrowth / 1024 / 1024)}MB growth`);
+        throw new Error(`Memory leak detected: ${Math.round(memoryAnalysis.memoryGrowth / 1024 / 1024)}MB growth`);
       }
       expect(memoryAnalysis.memoryLeakDetected).toBe(false);
 
@@ -702,7 +702,7 @@ describe('Test Suite Maintenance and Evolution', () => {
       
       // Test: WebSocket performance should be acceptable
       if (websocketAnalysis.performanceDegradation !== false) {
-        fail(`WebSocket performance degradation: ${Math.round(websocketAnalysis.averageCommandTime)}ms average per command`);
+        throw new Error(`WebSocket performance degradation: ${Math.round(websocketAnalysis.averageCommandTime)}ms average per command`);
       }
       expect(websocketAnalysis.performanceDegradation).toBe(false);
       
@@ -745,12 +745,12 @@ describe('Test Suite Maintenance and Evolution', () => {
       
       // Test: SSH connection should be efficient
       if (efficiencyResult.connectionTime >= 15000) {
-        fail(`SSH connection efficiency regression: ${efficiencyResult.connectionTime}ms too slow`);
+        throw new Error(`SSH connection efficiency regression: ${efficiencyResult.connectionTime}ms too slow`);
       }
       expect(efficiencyResult.connectionTime).toBeLessThan(15000);
       
       if (efficiencyResult.success !== true) {
-        fail('SSH connection efficiency test failed: Command execution unsuccessful');
+        throw new Error('SSH connection efficiency test failed: Command execution unsuccessful');
       }
       expect(efficiencyResult.success).toBe(true);
 
