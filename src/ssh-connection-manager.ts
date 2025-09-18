@@ -1,4 +1,4 @@
-import { Client, ClientChannel } from "ssh2";
+import { Client } from "ssh2";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import * as os from "os";
@@ -6,7 +6,6 @@ import * as path from "path";
 import {
   SSHConnection,
   SSHConnectionConfig,
-  SSHConnectConfig,
   ConnectionStatus,
   CommandResult,
   CommandOptions,
@@ -30,10 +29,6 @@ export interface ISSHConnectionManager {
     callback: (entry: TerminalOutputEntry) => void,
   ): void;
   hasSession(name: string): boolean;
-  sendTerminalInput(sessionName: string, input: string): void;
-  sendTerminalInputRaw(sessionName: string, input: string): void;
-  sendTerminalSignal(sessionName: string, signal: string): void;
-  resizeTerminal(sessionName: string, cols: number, rows: number): void;
   getCommandHistory(sessionName: string): CommandHistoryEntry[];
   addCommandHistoryListener(
     sessionName: string,
@@ -43,12 +38,32 @@ export interface ISSHConnectionManager {
     sessionName: string,
     callback: (entry: CommandHistoryEntry) => void,
   ): void;
+
   // Server-Side Command Capture API
   getBrowserCommandBuffer(sessionName: string): BrowserCommandEntry[];
   getUserBrowserCommands(sessionName: string): BrowserCommandEntry[];
   clearBrowserCommandBuffer(sessionName: string): void;
   addBrowserCommand(sessionName: string, command: string, commandId: string, source: 'user' | 'claude'): void;
   updateBrowserCommandResult(sessionName: string, commandId: string, result: CommandResult): void;
+
+  // Terminal Interaction Methods
+  sendTerminalInput(sessionName: string, input: string): void;
+  sendTerminalInputRaw(sessionName: string, input: string): void;
+  sendTerminalSignal(sessionName: string, signal: string): void;
+  resizeTerminal(sessionName: string, cols: number, rows: number): void;
+
+  // Nuclear Timeout Methods
+  setNuclearTimeoutDuration(duration: number): Promise<{ success: boolean }>;
+  getNuclearTimeoutDuration(sessionName: string): number;
+  hasActiveNuclearTimeout(sessionName: string): boolean;
+  hasTriggeredNuclearFallback(sessionName: string): boolean;
+  cancelMCPCommands(sessionName: string): { success: boolean };
+  getLastNuclearFallbackReason(sessionName: string): string | undefined;
+  clearNuclearTimeout(sessionName: string): void;
+  getNuclearTimeoutStartTime(sessionName: string): number | undefined;
+
+  // Session Health Check
+  isSessionHealthy(sessionName: string): boolean;
 }
 
 export interface TerminalOutputEntry {
@@ -76,54 +91,17 @@ interface SessionData {
   connection: SSHConnection;
   client: Client;
   config: SSHConnectionConfig;
-  shellChannel?: ClientChannel;
-  isShellReady: boolean;
-  initialPromptShown: boolean;
   outputBuffer: TerminalOutputEntry[];
   outputListeners: TerminalOutputListener[];
   commandHistory: CommandHistoryEntry[];
   commandHistoryListeners: CommandHistoryListener[];
-  // Browser command capture buffer for server-side command tracking
   browserCommandBuffer: BrowserCommandEntry[];
-  currentCommand?: {
-    command: string;
-    resolve: (result: CommandResult) => void;
-    reject: (error: Error) => void;
-    options: CommandOptions;
-    stdout: string;
-    stderr: string;
-    startTime: number;
-    timeoutHandle?: ReturnType<typeof setTimeout>;
-  };
-  // Command queue for handling concurrent commands
   commandQueue: QueuedCommand[];
   isCommandExecuting: boolean;
-  // SSH server echo management
-  rawInputMode: boolean;
-  echoDisabled: boolean;
-  // Command echo state tracking for duplicate removal
-  lastCommandSent?: string;
-  expectingCommandEcho: boolean;
-  // Nuclear Fallback - Story 01: Timeout Detection
-  nuclearFallback?: {
-    timeoutHandle: ReturnType<typeof setTimeout>;
-    startTime: number;
-    duration: number;
-    reason: 'browser_cancellation' | 'mcp_cancellation';
-    triggered: boolean;
-    lastFallbackReason?: string;
-  };
 }
 
 // Terminal output streaming interfaces
 
-interface RegexPatterns {
-  promptPattern: RegExp;
-  standalonePattern: RegExp;
-  middlePattern: RegExp;
-  startPattern: RegExp;
-  duplicatePattern: RegExp;
-}
 
 export class SSHConnectionManager implements ISSHConnectionManager {
   private static readonly MAX_OUTPUT_BUFFER_SIZE = 1000;
@@ -133,9 +111,6 @@ export class SSHConnectionManager implements ISSHConnectionManager {
   private connections: Map<string, SessionData> = new Map();
   private webServerPort: number;
   private commandStateManager?: CommandStateManager;
-  
-  // Pattern cache for performance optimization
-  private patternCache: Map<string, RegexPatterns> = new Map();
 
   constructor(webServerPort: number = 8080) {
     // CRITICAL FIX: Removed console.log that was polluting stdio MCP communication
@@ -210,7 +185,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     if (!sessionData) return;
 
     // Apply source-aware output processing
-    const processedData = this.prepareOutputForBrowserWithSource(data, source, sessionData);
+    const processedData = this.prepareOutputForBrowserWithSource(data, source);
     
     const outputEntry: TerminalOutputEntry = {
       timestamp: Date.now(),
@@ -244,7 +219,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     if (!sessionData) return;
 
     // Apply source-aware output processing
-    const processedData = this.prepareOutputForBrowserWithSource(data, source, sessionData);
+    const processedData = this.prepareOutputForBrowserWithSource(data, source);
     
     const outputEntry: TerminalOutputEntry = {
       timestamp: Date.now(),
@@ -302,7 +277,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       client.on("ready", () => {
         clearTimeout(timeout);
 
-        // Connection established - shell initialization will handle the initial prompt
+        // Connection established - ready for exec() commands
 
         const connection: SSHConnection = {
           name: config.name,
@@ -316,36 +291,19 @@ export class SSHConnectionManager implements ISSHConnectionManager {
           connection,
           client,
           config,
-          isShellReady: false,
-          initialPromptShown: false,
           outputBuffer: [],
           outputListeners: [],
           commandHistory: [],
           commandHistoryListeners: [],
-          // Initialize browser command capture buffer
           browserCommandBuffer: [],
           commandQueue: [],
           isCommandExecuting: false,
-          // SSH server echo management - controlled echo for proper terminal behavior
-          rawInputMode: false,     // Use canonical mode for line-based input
-          echoDisabled: false,     // Enable controlled echo (shell handles this properly)
-          // Command echo state tracking
-          lastCommandSent: undefined,
-          expectingCommandEcho: false,
         };
 
         this.connections.set(config.name, sessionData);
 
-        // Initialize persistent shell session
-        this.initializeShellSession(sessionData)
-          .then(() => {
-            resolve(connection);
-          })
-          .catch((error) => {
-            client.destroy();
-            this.connections.delete(config.name);
-            reject(error);
-          });
+        // Direct connection - no shell session initialization
+        resolve(connection);
       });
 
       client.on("error", (err) => {
@@ -381,277 +339,12 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     });
   }
 
-  private async initializeShellSession(
-    sessionData: SessionData,
-  ): Promise<void> {
-    return new Promise((resolve, reject) => {
-      // Simple PTY configuration - no complex PS1 bullshit
-      const ptyOptions = {
-        term: 'xterm-256color',
-        cols: 80,
-        rows: 24,
-        env: {
-          'TERM': 'xterm-256color'
-        }
-      };
-
-      sessionData.client.shell(ptyOptions, (err, channel) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-
-        sessionData.shellChannel = channel;
-
-        // Working PS1 configuration with deadlock prevention
-        let initOutput = "";
-        let ps1ConfigSent = false;
-        let postConfigOutput = '';
-
-        const initTimeout = setTimeout(() => {
-          // Prevent deadlock - resolve after 8 seconds no matter what
-          channel.removeListener("data", onInitData);
-          sessionData.isShellReady = true;
-          sessionData.initialPromptShown = true;
-          this.setupShellHandlers(sessionData);
-          resolve();
-        }, 8000);
-
-        const onInitData = (data: Buffer): void => {
-          const newData = data.toString();
-          // Filter out contamination
-          if (!newData.includes('null 2>&1')) {
-            initOutput += newData;
-          }
-
-          // Look for initial prompt to configure PS1
-          if (!ps1ConfigSent && this.detectShellPrompt(initOutput)) {
-            ps1ConfigSent = true;
-            const ps1ConfigCmd = `export PS1='[\\u@\\h \\W]\\$ '\n`;
-            channel.write(ps1ConfigCmd);
-            postConfigOutput = '';
-          } else if (ps1ConfigSent) {
-            // Accumulate post-PS1 output
-            if (!newData.includes('null 2>&1')) {
-              postConfigOutput += newData;
-            }
-
-            // Check for bracket format prompt after PS1 config
-            if (postConfigOutput.includes('[') && postConfigOutput.includes(']$')) {
-              clearTimeout(initTimeout);
-              channel.removeListener("data", onInitData);
-              sessionData.isShellReady = true;
-              sessionData.initialPromptShown = true;
-              this.setupShellHandlers(sessionData);
-              resolve();
-            }
-          }
-        };
-
-        channel.on("data", onInitData);
-
-        channel.on("close", () => {
-          sessionData.isShellReady = false;
-          sessionData.shellChannel = undefined;
-        });
-      });
-    });
-  }
-
-  private detectShellPrompt(output: string): boolean {
-    // Enhanced shell prompt detection - handles both default and bracket format prompts
-    const lines = output.split("\n");
-    const lastLine = lines[lines.length - 1] || "";
-    const secondLastLine = lines[lines.length - 2] || "";
-
-    // Check multiple prompt patterns - ONLY at end of lines for proper command completion detection
-    const promptPatterns = [
-      /\$\s*$/, // $ at end of line
-      /#\s*$/, // # at end of line
-      />\s*$/, // > at end of line
-      /[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+.*[$#>]\s*$/, // user@host...$ pattern
-      /\[[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+.*\][$#>]\s*$/, // [user@host...]$ pattern
-      /\[[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+\s+[^\]]*\]\$\s*$/, // [user@host path]$ pattern (with spaces)
-    ];
-
-    // Check if any line ends with a prompt pattern
-    for (const pattern of promptPatterns) {
-      if (pattern.test(lastLine) || pattern.test(secondLastLine)) {
-        return true;
-      }
-    }
-
-    // FALLBACK: Also check for prompt patterns with carriage returns (CRLF handling)
-    // The terminal output might have \r\n line endings that affect pattern matching
-    const lastLineClean = lastLine.replace(/\r/g, '').trim();
-    const secondLastLineClean = secondLastLine.replace(/\r/g, '').trim();
-
-    for (const pattern of promptPatterns) {
-      if (pattern.test(lastLineClean) || pattern.test(secondLastLineClean)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
 
 
-  /**
-   * Get cached regex patterns for a command, creating them if necessary
-   * Optimizes performance by avoiding repeated regex creation
-   * @param command - The command to create patterns for
-   * @returns Cached regex patterns for echo suppression
-   */
-  private getCachedPatterns(command: string): RegexPatterns {
-    // Input validation and error boundaries
-    if (!command || typeof command !== 'string' || command.trim().length === 0) {
-      throw new Error(`Invalid command for pattern caching: ${command}`);
-    }
 
-    if (this.patternCache.has(command)) {
-      return this.patternCache.get(command)!;
-    }
 
-    try {
-      const escapedCommand = this.escapeRegex(command);
-      const patterns: RegexPatterns = {
-        promptPattern: new RegExp(`(\\[[^\\]]+\\]\\$\\s+)${escapedCommand}(\\r?\\n)`, 'g'),
-        standalonePattern: new RegExp(`^\\s*${escapedCommand}\\s*\\r?\\n`, 'gm'),
-        middlePattern: new RegExp(`\\r?\\n\\s*${escapedCommand}\\s*\\r?\\n`, 'g'),
-        startPattern: new RegExp(`^\\s*${escapedCommand}\\s*\\r?\\n`, ''),
-        duplicatePattern: new RegExp(`\\n${escapedCommand}\\n${escapedCommand}\\n`, 'g')
-      };
 
-      this.patternCache.set(command, patterns);
-      return patterns;
-    } catch (error) {
-      console.error(`[Pattern Cache Error] Failed to create patterns for command: ${command}`, error);
-      throw error;
-    }
-  }
 
-  /**
-   * Aggressive command echo suppression specifically for WebSocket commands
-   * Removes ALL instances of the command to prevent browser echo duplication
-   * @param data - Raw SSH output data (string)
-   * @param command - The command that was executed
-   * @returns Processed string with command echo completely suppressed
-   */
-  private suppressWebSocketCommandEcho(data: string, command: string): string {
-    // Input validation
-    if (!data || typeof data !== 'string') {
-      return data || '';
-    }
-    
-    const originalOutput = data;
-    
-    try {
-      let processedOutput = data;
-      const patterns = this.getCachedPatterns(command);
-      
-      // PERFORMANCE FIX: Reset regex lastIndex to prevent state issues with global regexes
-      patterns.promptPattern.lastIndex = 0;
-      patterns.standalonePattern.lastIndex = 0;
-      patterns.middlePattern.lastIndex = 0;
-      patterns.startPattern.lastIndex = 0;
-      patterns.duplicatePattern.lastIndex = 0;
-      
-      // AGGRESSIVE SUPPRESSION: Remove ALL occurrences of the command in various contexts
-      
-      // 1. Remove command that appears after bracket prompt: "[user@host path]$ command\n" -> "[user@host path]$ \n"
-      processedOutput = processedOutput.replace(patterns.promptPattern, '$1$2');
-      
-      // 2. Remove standalone command lines: "command\n" -> ""
-      processedOutput = processedOutput.replace(patterns.standalonePattern, '');
-      
-      // 3. Remove command in the middle of output: "\ncommand\n" -> "\n"  
-      processedOutput = processedOutput.replace(patterns.middlePattern, '\r\n');
-      
-      // 4. Remove command at start of output: "command\n" -> ""
-      processedOutput = processedOutput.replace(patterns.startPattern, '');
-      
-      // 5. Remove duplicate standalone command lines that might appear in chunks
-      processedOutput = processedOutput.replace(patterns.duplicatePattern, `\n${command}\n`);
-      
-      // Log suppression activity for debugging if needed
-      if (originalOutput !== processedOutput && originalOutput.includes(command)) {
-        console.debug(`[ECHO SUPPRESSION] Suppressed "${command}" echo - length: ${originalOutput.length} -> ${processedOutput.length}`);
-      }
-      
-      return processedOutput;
-    } catch (error) {
-      console.error(`[Echo Suppression Error] Command: ${command}, Error:`, error);
-      // Return original output if suppression fails
-      return originalOutput;
-    }
-  }
-
-  /**
-   * Escape special regex characters in command strings
-   * @param str - String to escape
-   * @returns Escaped string safe for regex
-   */
-  private escapeRegex(str: string): string {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  }
-
-  private setupShellHandlers(sessionData: SessionData): void {
-    if (!sessionData.shellChannel) {
-      return;
-    }
-
-    // CRITICAL: Permanent handler for ALL terminal output (interactive + commands)
-    sessionData.shellChannel.on("data", (data: Buffer) => {
-      let processedData = data;
-      
-      // Note: Echo suppression for WebSocket commands is now handled in prepareOutputForBrowser()
-      // to work with the complete accumulated output rather than individual chunks
-      
-      const output = processedData.toString();
-      
-      // Source-aware output processing handles echo suppression
-      
-      // CRITICAL FIX: Store processed output without echo duplication
-      // Broadcast processed output to browsers for real-time display 
-      this.broadcastToLiveListeners(
-        sessionData.connection.name, 
-        output, 
-        "stdout",
-        sessionData.currentCommand ? sessionData.currentCommand.options.source : 'system'
-      );
-      
-      // Store raw output in history for replay (cleanup happens in prepareOutputForBrowser)
-      // CRITICAL FIX: Skip storing contaminated shell initialization output
-      if (!output.includes('null 2>&1')) {
-        this.storeInHistory(
-          sessionData.connection.name,
-          output,
-          "stdout", 
-          sessionData.currentCommand ? sessionData.currentCommand.options.source : 'system'
-        );
-      }
-      
-      // If there's a command executing, accumulate for API response AND check for completion
-      if (sessionData.currentCommand) {
-        sessionData.currentCommand.stdout += output;
-        
-        // Check for command completion when we detect a shell prompt
-        if (this.detectShellPrompt(sessionData.currentCommand.stdout)) {
-          this.completeSimpleCommand(sessionData, null, sessionData.currentCommand.stdout);
-        }
-      }
-    });
-    
-    // Keep stderr handler for error accumulation during commands
-    sessionData.shellChannel.stderr?.on("data", (data: Buffer) => {
-      const output = data.toString();
-      
-      // Only accumulate stderr during command execution
-      if (sessionData.currentCommand) {
-        sessionData.currentCommand.stderr += output;
-      }
-    });
-  }
 
   async executeCommand(
     connectionName: string,
@@ -665,8 +358,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
 
     const sessionData = this.getValidatedSession(connectionName);
 
-    // For MCP commands, we don't need shell session readiness since we use exec()
-    // Only browser/WebSocket commands need the persistent shell session
+    // ALL commands use exec() - no shell session dependency
 
     return new Promise((resolve, reject) => {
       // SECURITY FIX: Check queue size limit to prevent DoS attacks
@@ -913,148 +605,6 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     });
   }
 
-  private completeSimpleCommand(
-    sessionData: SessionData,
-    onData: ((data: Buffer) => void) | null,
-    rawOutput: string,
-  ): void {
-    if (!sessionData.currentCommand || !sessionData.shellChannel) {
-      return;
-    }
-
-
-    // Only remove temporary listener if it exists (legacy support)
-    if (onData) {
-      sessionData.shellChannel.removeListener("data", onData);
-    }
-
-    // Clear timeout
-    if (sessionData.currentCommand.timeoutHandle) {
-      clearTimeout(sessionData.currentCommand.timeoutHandle);
-    }
-
-    const { resolve } = sessionData.currentCommand;
-
-    // For MCP API response - clean output by removing shell control sequences and prompts
-    let cleanOutput = rawOutput
-      .replace(/\r/g, "") // Remove carriage returns
-      .replace(/\[?\?\d+[lh]/g, "") // Remove terminal control sequences like [?2004l and [?2004h
-      // eslint-disable-next-line no-control-regex
-      .replace(/\u001b\[[0-9;]*[a-zA-Z]/g, "") // Remove ANSI escape sequences
-      // eslint-disable-next-line no-control-regex
-      .replace(/\u001b/g, "") // Remove standalone ESC characters
-      // eslint-disable-next-line no-control-regex
-      .replace(/\u0007/g, ""); // Remove bell character
-
-    const lines = cleanOutput.split("\n");
-    const resultLines: string[] = [];
-    let exitCode = 0;
-
-    for (const line of lines) {
-      let trimmed = line.trim();
-
-      if (!trimmed) continue;
-
-      // Skip command echo
-      const originalCommand = sessionData.currentCommand.command.trim();
-      if (trimmed === originalCommand) {
-        continue;
-      }
-
-      // Skip lines that are just prompts (both old and bracket formats from SSH server)
-      if (
-        /^[\]a-zA-Z0-9_.-]+@[\]a-zA-Z0-9_.-]+.*[$#>]\s*$/.test(trimmed) ||
-        /^[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+:[^$]*$\s*$/.test(trimmed) ||
-        /^\[[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+\s+[^\]]+\]\$\s*$/.test(trimmed) ||
-        /^[$#>]\s*$/.test(trimmed)
-      ) {
-        continue;
-      }
-
-      // Remove prompt prefix if it appears at the beginning of output (both old and bracket formats)
-      trimmed = trimmed.replace(
-        /^[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+:[~\w/.[\]-]*[$#>]\$?\s*/,
-        "",
-      );
-      trimmed = trimmed.replace(
-        /^\[[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+\s+[^\]]+\]\$\s*/,
-        "",
-      );
-
-      // Remove prompt suffix if it appears at the end of actual output (both old and bracket formats)
-      trimmed = trimmed.replace(
-        /\s*[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+:[~\w/.[\]-]*[$#>]\s*$/,
-        "",
-      );
-      trimmed = trimmed.replace(
-        /\s*\[[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+\s+[^\]]+\]\$\s*$/,
-        "",
-      );
-
-      if (trimmed) {
-        resultLines.push(trimmed);
-      }
-    }
-
-    const commandOutput = resultLines.join("\n").trim();
-
-    const result: CommandResult = {
-      stdout: commandOutput,
-      stderr: "", // Shell sessions combine stdout/stderr - all output is in stdout
-      exitCode,
-    };
-
-    // ARCHITECTURAL FIX: Remove duplicate broadcast/storage calls
-    // The permanent data handler already broadcasts and stores all terminal output in real-time
-    // This eliminates the double processing issue identified by the elite architect
-
-    // Record command in history
-    const executionEndTime = Date.now();
-    const duration = executionEndTime - sessionData.currentCommand.startTime;
-    const historyEntry: CommandHistoryEntry = {
-      command: sessionData.currentCommand.command,
-      timestamp: sessionData.currentCommand.startTime,
-      duration,
-      exitCode,
-      status: exitCode === 0 ? "success" : "failure",
-      sessionName: sessionData.connection.name,
-      source: sessionData.currentCommand.options.source || "claude",
-    };
-
-    // Add to history (maintaining max MAX_COMMAND_HISTORY_SIZE entries)
-    sessionData.commandHistory.push(historyEntry);
-    if (sessionData.commandHistory.length > SSHConnectionManager.MAX_COMMAND_HISTORY_SIZE) {
-      sessionData.commandHistory.shift(); // Remove oldest entry
-    }
-
-    // Broadcast command execution to listeners
-    sessionData.commandHistoryListeners.forEach((listener) => {
-      try {
-        listener.callback(historyEntry);
-      } catch (error) {
-        // Silent error handling - don't crash on listener errors
-      }
-    });
-
-    resolve(result);
-    
-    // Nuclear Fallback - Story 01: Clear timeout on successful command completion
-    if (sessionData.nuclearFallback && !sessionData.nuclearFallback.triggered) {
-      clearTimeout(sessionData.nuclearFallback.timeoutHandle);
-      delete sessionData.nuclearFallback;
-    }
-    
-    sessionData.currentCommand = undefined;
-
-    // Mark command execution as complete
-    sessionData.isCommandExecuting = false;
-
-    // Update session tracking
-    sessionData.connection.lastActivity = new Date();
-
-    // Process next command in queue if any
-    this.processCommandQueue(sessionData);
-  }
 
   private getValidatedSession(sessionName: string): SessionData {
     const sessionData = this.connections.get(sessionName);
@@ -1074,364 +624,6 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     }
   }
 
-  // Nuclear Fallback - Story 01: Timeout Detection Methods
-  
-  /**
-   * Check if a session has an active nuclear fallback timeout
-   */
-  hasActiveNuclearTimeout(sessionName: string): boolean {
-    const sessionData = this.connections.get(sessionName);
-    return !!(sessionData?.nuclearFallback && !sessionData.nuclearFallback.triggered);
-  }
-
-  /**
-   * Get the configured nuclear timeout duration for a session
-   */
-  getNuclearTimeoutDuration(sessionName: string): number {
-    const sessionData = this.connections.get(sessionName);
-    return sessionData?.nuclearFallback?.duration ?? 30000; // Default 30 seconds
-  }
-
-  /**
-   * Get the nuclear timeout start time for a session
-   */
-  getNuclearTimeoutStartTime(sessionName: string): number {
-    const sessionData = this.connections.get(sessionName);
-    return sessionData?.nuclearFallback?.startTime ?? 0;
-  }
-
-  /**
-   * Check if nuclear fallback has been triggered for a session
-   */
-  hasTriggeredNuclearFallback(sessionName: string): boolean {
-    const sessionData = this.connections.get(sessionName);
-    return !!(sessionData?.nuclearFallback?.triggered);
-  }
-
-  /**
-   * Get the last nuclear fallback reason for a session
-   */
-  getLastNuclearFallbackReason(sessionName: string): string {
-    const sessionData = this.connections.get(sessionName);
-    return sessionData?.nuclearFallback?.lastFallbackReason ?? '';
-  }
-
-  /**
-   * Set nuclear timeout duration (for testing purposes)
-   */
-  async setNuclearTimeoutDuration(duration: number): Promise<void> {
-    // Update all active sessions
-    for (const sessionData of this.connections.values()) {
-      if (sessionData.nuclearFallback && !sessionData.nuclearFallback.triggered) {
-        sessionData.nuclearFallback.duration = duration;
-        // Restart timer with new duration
-        clearTimeout(sessionData.nuclearFallback.timeoutHandle);
-        const remainingTime = duration - (Date.now() - sessionData.nuclearFallback.startTime);
-        if (remainingTime > 0) {
-          sessionData.nuclearFallback.timeoutHandle = setTimeout(async () => {
-            await this.triggerNuclearFallback(sessionData);
-          }, remainingTime);
-        } else {
-          await this.triggerNuclearFallback(sessionData);
-        }
-      }
-    }
-  }
-
-  /**
-   * Clear nuclear timeout for a session
-   */
-  clearNuclearTimeout(sessionName: string): void {
-    const sessionData = this.connections.get(sessionName);
-    if (sessionData?.nuclearFallback) {
-      clearTimeout(sessionData.nuclearFallback.timeoutHandle);
-      delete sessionData.nuclearFallback;
-    }
-  }
-
-  /**
-   * Check if session is healthy (for testing nuclear fallback recovery)
-   */
-  isSessionHealthy(sessionName: string): boolean {
-    const sessionData = this.connections.get(sessionName);
-    return !!(sessionData?.isShellReady && sessionData.shellChannel);
-  }
-
-  /**
-   * Cancel MCP commands and start nuclear timeout
-   */
-  cancelMCPCommands(sessionName: string): { success: boolean; cancelledCommands: string[] } {
-    const sessionData = this.getValidatedSession(sessionName);
-    
-    // Find MCP commands in buffer
-    const mcpCommands = sessionData.browserCommandBuffer.filter(cmd => cmd.source === 'claude');
-    
-    // Clear MCP commands from buffer
-    sessionData.browserCommandBuffer = sessionData.browserCommandBuffer.filter(
-      cmd => cmd.source !== 'claude'
-    );
-    
-    // Start nuclear fallback timeout
-    this.startNuclearTimeout(sessionData, 'mcp_cancellation');
-    
-    return {
-      success: true,
-      cancelledCommands: mcpCommands.map(cmd => cmd.command)
-    };
-  }
-
-  /**
-   * Create new SSH connection without adding to connections map (for nuclear fallback re-establishment)
-   */
-  private async createNewSSHConnection(config: SSHConnectionConfig): Promise<{
-    client: Client;
-    connection: SSHConnection;
-    config: SSHConnectionConfig;
-    shellChannel: ClientChannel;
-    isShellReady: boolean;
-  }> {
-    // Process authentication credentials with priority: privateKey > keyFilePath > password
-    let resolvedPrivateKey: string | undefined;
-    
-    if (config.privateKey) {
-      resolvedPrivateKey = config.privateKey;
-    } else if (config.keyFilePath !== undefined) {
-      try {
-        resolvedPrivateKey = await this.readPrivateKeyFromFile(config.keyFilePath, config.passphrase);
-      } catch (error) {
-        const sanitizedError = this.sanitizeKeyFileError(error as Error);
-        throw new Error(`Failed to read key file: ${sanitizedError}`);
-      }
-    }
-
-    const client = new Client();
-    
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        client.destroy();
-        reject(new Error("Nuclear fallback SSH re-establishment timeout after 10 seconds"));
-      }, 10000);
-
-      client.on("ready", () => {
-        clearTimeout(timeout);
-        
-        const connection: SSHConnection = {
-          name: config.name,
-          host: config.host,
-          username: config.username,
-          status: ConnectionStatus.CONNECTED,
-          lastActivity: new Date(),
-        };
-
-        // Create shell session
-        client.shell({ term: "xterm-256color" }, (err, stream) => {
-          if (err) {
-            client.destroy();
-            reject(new Error(`Shell creation failed: ${err.message}`));
-            return;
-          }
-
-          // Wait for initial prompt before considering shell ready
-          let initialOutput = '';
-          let promptTimeout: ReturnType<typeof setTimeout>;
-          
-          const onData = (data: Buffer): void => {
-            initialOutput += data.toString();
-            
-            // Look for shell prompt patterns using existing detection method
-            if (this.detectShellPrompt(initialOutput)) {
-              clearTimeout(promptTimeout);
-              stream.off('data', onData);
-              
-              log.debug('Shell prompt detected, connection ready for commands');
-              
-              // Shell is ready for commands
-              resolve({
-                client,
-                connection,
-                config,
-                shellChannel: stream,
-                isShellReady: true
-              });
-            }
-          };
-
-          // Set up timeout for prompt detection
-          promptTimeout = setTimeout(() => {
-            stream.off('data', onData);
-            log.warn('Shell prompt not detected within timeout, proceeding anyway');
-            
-            // Proceed even without detected prompt - shell should still work
-            resolve({
-              client,
-              connection,
-              config,
-              shellChannel: stream,
-              isShellReady: true
-            });
-          }, 3000); // 3 second timeout for prompt detection
-
-          stream.on('data', onData);
-        });
-      });
-
-      client.on("error", (error) => {
-        clearTimeout(timeout);
-        reject(new Error(`SSH connection failed: ${error.message}`));
-      });
-
-      // Connect with authentication using properly typed config
-      const connectConfig: SSHConnectConfig = {
-        host: config.host,
-        port: config.port || 22,
-        username: config.username,
-        keepaliveInterval: 30000,
-        keepaliveCountMax: 5,
-      };
-
-      if (resolvedPrivateKey) {
-        connectConfig.privateKey = resolvedPrivateKey;
-        connectConfig.passphrase = config.passphrase;
-      } else if (config.password) {
-        connectConfig.password = config.password;
-      } else {
-        reject(new Error("No authentication method provided"));
-        return;
-      }
-
-      client.connect(connectConfig);
-    });
-  }
-
-  /**
-   * Start nuclear fallback timeout for a session
-   */
-  private startNuclearTimeout(sessionData: SessionData, reason: 'browser_cancellation' | 'mcp_cancellation'): void {
-    // Clear any existing timeout
-    if (sessionData.nuclearFallback) {
-      clearTimeout(sessionData.nuclearFallback.timeoutHandle);
-    }
-
-    const duration = 30000; // 30 seconds
-    const startTime = Date.now();
-
-    const timeoutHandle = setTimeout(async () => {
-      await this.triggerNuclearFallback(sessionData);
-    }, duration);
-
-    sessionData.nuclearFallback = {
-      timeoutHandle,
-      startTime,
-      duration,
-      reason,
-      triggered: false
-    };
-  }
-
-  /**
-   * Trigger nuclear fallback - terminate and re-establish SSH session with timeout protection
-   */
-  private async triggerNuclearFallback(sessionData: SessionData): Promise<void> {
-    log.warn('NUCLEAR FALLBACK TRIGGERED for session:', sessionData.connection.name);
-    
-    if (!sessionData.nuclearFallback) {
-      return;
-    }
-
-    // Mark as triggered
-    sessionData.nuclearFallback.triggered = true;
-    sessionData.nuclearFallback.lastFallbackReason = `Nuclear fallback triggered after ${sessionData.nuclearFallback.duration}ms timeout`;
-
-    // Story 02: Actual SSH session termination and re-establishment
-    log.warn('TERMINATING SSH CONNECTION for session:', sessionData.connection.name);
-    
-    // Clear command buffers and state
-    sessionData.browserCommandBuffer = [];
-    
-    // Clear current command if any
-    if (sessionData.currentCommand) {
-      sessionData.currentCommand.reject(new Error('Command cancelled due to nuclear fallback'));
-      sessionData.currentCommand = undefined;
-    }
-
-    // Clear command queue
-    sessionData.commandQueue.forEach(queuedCmd => {
-      queuedCmd.reject(new Error('Command cancelled due to nuclear fallback'));
-    });
-    sessionData.commandQueue = [];
-    
-    sessionData.isCommandExecuting = false;
-
-    // Preserve essential configuration for re-establishment
-    const originalConfig = {
-      name: sessionData.connection.name,
-      host: sessionData.connection.host,
-      username: sessionData.connection.username,
-      keyFilePath: sessionData.config.keyFilePath,
-      port: sessionData.config.port || 22,
-      password: sessionData.config.password,
-      passphrase: sessionData.config.passphrase,
-      privateKey: sessionData.config.privateKey
-    };
-
-    // Force terminate existing SSH connection
-    try {
-      if (sessionData.shellChannel) {
-        sessionData.shellChannel.end();
-        sessionData.shellChannel = undefined;
-      }
-      sessionData.client.destroy();
-      sessionData.isShellReady = false;
-      sessionData.initialPromptShown = false;
-    } catch (error) {
-      log.warn('Error during SSH connection termination:', error instanceof Error ? error.message : String(error));
-    }
-
-    // Re-establish SSH connection with original configuration and timeout protection
-    try {
-      log.info('RE-ESTABLISHING SSH CONNECTION for session:', originalConfig.name);
-      
-      // Add timeout protection for nuclear fallback re-establishment
-      const reestablishmentPromise = this.createNewSSHConnection(originalConfig);
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => {
-          reject(new Error('Nuclear fallback re-establishment timed out after 30 seconds'));
-        }, 30000);
-      });
-      
-      // Race between re-establishment and timeout
-      const newResult = await Promise.race([reestablishmentPromise, timeoutPromise]);
-      
-      // Update session data with new connection
-      sessionData.client = newResult.client;
-      sessionData.connection = newResult.connection;
-      sessionData.config = newResult.config;
-      sessionData.shellChannel = newResult.shellChannel;
-      sessionData.isShellReady = newResult.isShellReady;
-      sessionData.initialPromptShown = false;
-      
-      // Set up shell handlers for the re-established connection
-      this.setupShellHandlers(sessionData);
-      
-      // Reset connection state
-      sessionData.rawInputMode = false;
-      sessionData.echoDisabled = false;
-      sessionData.lastCommandSent = undefined;
-      sessionData.expectingCommandEcho = false;
-      
-      log.info('SSH CONNECTION RE-ESTABLISHED for session:', originalConfig.name);
-      sessionData.nuclearFallback.lastFallbackReason = `Nuclear fallback completed - session re-established after ${sessionData.nuclearFallback.duration}ms timeout`;
-      
-    } catch (error) {
-      log.error('SSH CONNECTION RE-ESTABLISHMENT FAILED for session: ' + originalConfig.name, error instanceof Error ? error : new Error(String(error)));
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      sessionData.nuclearFallback.lastFallbackReason = `Nuclear fallback failed - reestablishment failed: ${errorMessage}`;
-      
-      // Mark session as unhealthy
-      sessionData.isShellReady = false;
-      sessionData.shellChannel = undefined;
-    }
-  }
 
   cleanup(): void {
     for (const sessionData of this.connections.values()) {
@@ -1441,19 +633,11 @@ export class SSHConnectionManager implements ISSHConnectionManager {
   }
 
   private cleanupSession(sessionData: SessionData): void {
-    if (sessionData.shellChannel) {
-      sessionData.shellChannel.end();
-    }
     // CRITICAL FIX: Null check before destroying client to prevent crashes
     if (sessionData.client) {
       sessionData.client.destroy();
     }
-    
-    // Clear nuclear fallback timeout if active
-    if (sessionData.nuclearFallback) {
-      clearTimeout(sessionData.nuclearFallback.timeoutHandle);
-    }
-    
+
     // CRITICAL FIX: Clear browser command buffer to prevent memory leaks
     sessionData.browserCommandBuffer = [];
   }
@@ -1590,132 +774,12 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       sessionData.commandQueue.length = 0;
     }
     
-    // Also reject the currently executing command if any
-    if (sessionData.currentCommand) {
-      sessionData.currentCommand.reject(new Error(
-        `Command interrupted - ${reason}`
-      ));
-      sessionData.currentCommand = undefined;
-      sessionData.isCommandExecuting = false;
-    }
+    // Mark session as not executing (for clean shutdown)
+    sessionData.isCommandExecuting = false;
   }
 
 
 
-  // Terminal interaction methods for Story 5
-  sendTerminalInput(sessionName: string, input: string): void {
-    const sessionData = this.getValidatedSession(sessionName);
-
-    if (!sessionData.isShellReady || !sessionData.shellChannel) {
-      throw new Error(
-        `Shell session not ready for connection '${sessionName}'`,
-      );
-    }
-
-    // Send input directly to the shell channel
-    sessionData.shellChannel.write(input);
-
-    // Update last activity
-    sessionData.connection.lastActivity = new Date();
-  }
-
-  sendTerminalInputRaw(sessionName: string, input: string): void {
-    const sessionData = this.getValidatedSession(sessionName);
-
-    if (!sessionData.isShellReady || !sessionData.shellChannel) {
-      throw new Error(
-        `Shell session not ready for connection '${sessionName}'`,
-      );
-    }
-
-    // Ensure raw input mode is enabled with echo disabled
-    // This method is specifically for character-by-character input from browsers
-    // where server echo would cause character duplication
-    if (!sessionData.rawInputMode || !sessionData.echoDisabled) {
-      sessionData.rawInputMode = true;
-      sessionData.echoDisabled = true;
-      // Note: PTY is already configured with ECHO disabled during session initialization
-      // No runtime reconfiguration needed as our default mode handles raw input correctly
-    }
-
-    // Send input directly to the shell channel
-    sessionData.shellChannel.write(input);
-
-    // Update last activity
-    sessionData.connection.lastActivity = new Date();
-  }
-
-  sendTerminalSignal(sessionName: string, signal: string): void {
-    const sessionData = this.getValidatedSession(sessionName);
-
-    if (!sessionData.isShellReady || !sessionData.shellChannel) {
-      throw new Error(
-        `Shell session not ready for connection '${sessionName}'`,
-      );
-    }
-
-    // Map signal names to control characters
-    let controlChar: string;
-    switch (signal.toUpperCase()) {
-      case "SIGINT":
-        controlChar = "\x03"; // Ctrl+C
-        break;
-      case "SIGTERM":
-      case "SIGQUIT":
-        controlChar = "\x04"; // Ctrl+D (EOF)
-        break;
-      case "SIGTSTP":
-        controlChar = "\x1A"; // Ctrl+Z
-        break;
-      default:
-        throw new Error(`Unsupported signal: ${signal}`);
-    }
-
-    // Send the control character
-    sessionData.shellChannel.write(controlChar);
-
-    // Story 01: Browser Command Cancellation - Clear browser command buffer on SIGINT (Ctrl-C)
-    // This allows MCP commands to proceed after user cancellation
-    if (signal.toUpperCase() === "SIGINT") {
-      // Clear only browser (user) commands, preserve MCP (claude) commands
-      sessionData.browserCommandBuffer = sessionData.browserCommandBuffer.filter(
-        cmd => cmd.source === 'claude'
-      );
-      
-      // Nuclear Fallback - Story 01: Start timeout on browser cancellation
-      this.startNuclearTimeout(sessionData, 'browser_cancellation');
-    }
-
-    // Update last activity
-    sessionData.connection.lastActivity = new Date();
-  }
-
-  resizeTerminal(sessionName: string, cols: number, rows: number): void {
-    const sessionData = this.getValidatedSession(sessionName);
-
-    if (!sessionData.isShellReady || !sessionData.shellChannel) {
-      throw new Error(
-        `Shell session not ready for connection '${sessionName}'`,
-      );
-    }
-
-    // Validate dimensions
-    if (cols < 1 || cols > 1000 || rows < 1 || rows > 1000) {
-      throw new Error(
-        "Invalid terminal dimensions: cols and rows must be between 1 and 1000",
-      );
-    }
-
-    // Send terminal resize signal using SSH2's setWindow method
-    try {
-      sessionData.shellChannel.setWindow(rows, cols, 0, 0);
-    } catch (error) {
-      throw new Error(`Failed to resize terminal: ${(error as Error).message}`);
-    }
-
-    // Update last activity
-    sessionData.connection.lastActivity = new Date();
-  }
 
   getCommandHistory(sessionName: string): CommandHistoryEntry[] {
     const sessionData = this.getValidatedSession(sessionName);
@@ -1968,18 +1032,14 @@ export class SSHConnectionManager implements ISSHConnectionManager {
    * @returns Processed output optimized for browser display
    */
   private prepareOutputForBrowserWithSource(
-    output: string, 
-    source?: import("./types.js").CommandSource, 
-    sessionData?: SessionData
+    output: string,
+    source?: import("./types.js").CommandSource,
   ): string {
-    // For WebSocket/browser commands (source: 'user'), apply aggressive command echo suppression
-    if (source === 'user' && sessionData?.currentCommand) {
-      return this.suppressWebSocketCommandEcho(output, sessionData.currentCommand.command);
-    } else if (source === 'system') {
+    if (source === 'system') {
       // System output passes through unchanged to preserve formatting
       return output;
     } else {
-      // MCP commands and other sources get standard browser preparation
+      // All commands get standard browser preparation
       return this.prepareOutputForBrowser(output);
     }
   }
@@ -2217,11 +1277,11 @@ export class SSHConnectionManager implements ISSHConnectionManager {
    */
   updateBrowserCommandResult(sessionName: string, commandId: string, result: CommandResult): void {
     this.validateSessionName(sessionName);
-    
+
     if (!commandId || typeof commandId !== 'string') {
       throw new Error('Command ID must be a non-empty string');
     }
-    
+
     if (!result || typeof result !== 'object') {
       throw new Error('Result must be a valid CommandResult object');
     }
@@ -2232,13 +1292,321 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       const commandEntry = sessionData.browserCommandBuffer.find(
         cmd => cmd.commandId === commandId
       );
-      
+
       if (commandEntry) {
         commandEntry.result = result;
       } else {
         log.warn(`Command ID ${commandId} not found in buffer for session ${sessionName}`);
       }
     }
+  }
+
+  // Terminal Interaction Methods for exec()-only execution model
+
+  /**
+   * Send terminal input to SSH session
+   * NOTE: In exec()-only model, this executes the input as a command
+   * @param sessionName - SSH session name
+   * @param input - Input to send to terminal
+   */
+  sendTerminalInput(sessionName: string, input: string): void {
+    this.validateSessionName(sessionName);
+
+    if (!input || typeof input !== 'string') {
+      log.warn(`Invalid terminal input for session ${sessionName}: input must be a non-empty string`);
+      return;
+    }
+
+    const sessionData = this.connections.get(sessionName);
+    if (!sessionData) {
+      log.warn(`Session ${sessionName} not found for terminal input`);
+      return;
+    }
+
+    // In exec()-only model, terminal input is executed as a command
+    // Track the command submission for echo suppression
+    this.trackCommandSubmission(sessionName, input.trim());
+
+    // Execute the input as a command with user source
+    this.executeCommand(sessionName, input.trim(), { source: 'user' })
+      .catch(error => {
+        log.warn(`Failed to execute terminal input "${input}" in session ${sessionName}: ${error instanceof Error ? error.message : String(error)}`);
+      });
+  }
+
+  /**
+   * Send raw terminal input to SSH session
+   * NOTE: In exec()-only model, this behaves the same as sendTerminalInput
+   * @param sessionName - SSH session name
+   * @param input - Raw input to send to terminal
+   */
+  sendTerminalInputRaw(sessionName: string, input: string): void {
+    this.validateSessionName(sessionName);
+
+    if (!input || typeof input !== 'string') {
+      log.warn(`Invalid raw terminal input for session ${sessionName}: input must be a non-empty string`);
+      return;
+    }
+
+    // In exec()-only model, raw input is treated the same as regular input
+    // Both are executed as commands since we don't have persistent shell sessions
+    this.sendTerminalInput(sessionName, input);
+  }
+
+  /**
+   * Send terminal signal to SSH session
+   * NOTE: In exec()-only model, signals are logged but cannot interrupt persistent shell
+   * @param sessionName - SSH session name
+   * @param signal - Signal to send (e.g., 'SIGINT', 'SIGTERM')
+   */
+  sendTerminalSignal(sessionName: string, signal: string): void {
+    this.validateSessionName(sessionName);
+
+    if (!signal || typeof signal !== 'string') {
+      log.warn(`Invalid signal for session ${sessionName}: signal must be a non-empty string`);
+      return;
+    }
+
+    const sessionData = this.connections.get(sessionName);
+    if (!sessionData) {
+      log.warn(`Session ${sessionName} not found for terminal signal ${signal}`);
+      return;
+    }
+
+    // In exec()-only model, we cannot send signals to persistent shells since they don't exist
+    // However, we can log the signal attempt and broadcast it for browser feedback
+    log.debug(`Signal ${signal} requested for session ${sessionName} (exec-only mode: signal logged but not sent to persistent shell)`);
+
+    // Broadcast the signal attempt to browsers for user feedback
+    this.broadcastToLiveListeners(
+      sessionName,
+      `Signal ${signal} sent\r\n`,
+      "stdout",
+      "system"
+    );
+
+    // If it's SIGINT, we could potentially cancel queued commands
+    if (signal === 'SIGINT' && sessionData.commandQueue.length > 0) {
+      log.debug(`SIGINT signal: cancelling ${sessionData.commandQueue.length} queued commands for session ${sessionName}`);
+      this.rejectAllQueuedCommands(sessionData, 'Interrupted by SIGINT signal');
+    }
+  }
+
+  /**
+   * Resize terminal for SSH session
+   * NOTE: In exec()-only model, terminal resize is logged but has no effect
+   * @param sessionName - SSH session name
+   * @param cols - Number of columns
+   * @param rows - Number of rows
+   */
+  resizeTerminal(sessionName: string, cols: number, rows: number): void {
+    this.validateSessionName(sessionName);
+
+    if (!Number.isInteger(cols) || cols <= 0) {
+      log.warn(`Invalid terminal columns for session ${sessionName}: must be a positive integer`);
+      return;
+    }
+
+    if (!Number.isInteger(rows) || rows <= 0) {
+      log.warn(`Invalid terminal rows for session ${sessionName}: must be a positive integer`);
+      return;
+    }
+
+    const sessionData = this.connections.get(sessionName);
+    if (!sessionData) {
+      log.warn(`Session ${sessionName} not found for terminal resize`);
+      return;
+    }
+
+    // In exec()-only model, we cannot resize persistent terminals since they don't exist
+    // However, we log the resize request for debugging purposes
+    log.debug(`Terminal resize requested for session ${sessionName}: ${cols}x${rows} (exec-only mode: resize logged but not applied to persistent terminal)`);
+
+    // Broadcast the resize event to browsers for informational purposes
+    this.broadcastToLiveListeners(
+      sessionName,
+      `Terminal resized to ${cols}x${rows}\r\n`,
+      "stdout",
+      "system"
+    );
+  }
+
+  // Nuclear Timeout Methods for command timeout handling
+
+  private nuclearTimeoutDuration: number = 30000; // Default 30 seconds
+  private nuclearTimeoutMap: Map<string, {
+    timeoutHandle?: ReturnType<typeof setTimeout>;
+    hasTriggered: boolean;
+    startTime: number;
+    lastFallbackReason?: string;
+  }> = new Map();
+
+  /**
+   * Set nuclear timeout duration for command execution
+   * @param duration - Timeout duration in milliseconds
+   */
+  async setNuclearTimeoutDuration(duration: number): Promise<{ success: boolean }> {
+    if (!Number.isInteger(duration) || duration <= 0) {
+      throw new Error('Nuclear timeout duration must be a positive integer in milliseconds');
+    }
+
+    if (duration > 3600000) { // 1 hour max
+      throw new Error('Nuclear timeout duration cannot exceed 1 hour (3600000ms)');
+    }
+
+    this.nuclearTimeoutDuration = duration;
+    log.debug(`Nuclear timeout duration set to ${duration}ms`);
+    return { success: true };
+  }
+
+  /**
+   * Get nuclear timeout duration for a session
+   * @param sessionName - SSH session name
+   * @returns Timeout duration in milliseconds
+   */
+  getNuclearTimeoutDuration(sessionName: string): number {
+    this.validateSessionName(sessionName);
+    return this.nuclearTimeoutDuration;
+  }
+
+  /**
+   * Check if session has active nuclear timeout
+   * @param sessionName - SSH session name
+   * @returns True if nuclear timeout is active
+   */
+  hasActiveNuclearTimeout(sessionName: string): boolean {
+    this.validateSessionName(sessionName);
+    const timeoutInfo = this.nuclearTimeoutMap.get(sessionName);
+    return timeoutInfo ? !!timeoutInfo.timeoutHandle : false;
+  }
+
+  /**
+   * Check if nuclear fallback has been triggered for session
+   * @param sessionName - SSH session name
+   * @returns True if nuclear fallback was triggered
+   */
+  hasTriggeredNuclearFallback(sessionName: string): boolean {
+    this.validateSessionName(sessionName);
+    const timeoutInfo = this.nuclearTimeoutMap.get(sessionName);
+    return timeoutInfo ? timeoutInfo.hasTriggered : false;
+  }
+
+  /**
+   * Cancel MCP commands and trigger nuclear fallback for session
+   * @param sessionName - SSH session name
+   */
+  cancelMCPCommands(sessionName: string): { success: boolean } {
+    this.validateSessionName(sessionName);
+
+    const sessionData = this.connections.get(sessionName);
+    if (!sessionData) {
+      log.warn(`Session ${sessionName} not found for MCP command cancellation`);
+      return { success: false };
+    }
+
+    // Trigger nuclear fallback
+    const timeoutInfo = this.nuclearTimeoutMap.get(sessionName) || {
+      hasTriggered: false,
+      startTime: Date.now()
+    };
+
+    timeoutInfo.hasTriggered = true;
+    timeoutInfo.lastFallbackReason = 'MCP commands cancelled due to nuclear fallback';
+    this.nuclearTimeoutMap.set(sessionName, timeoutInfo);
+
+    // Cancel all queued commands
+    this.rejectAllQueuedCommands(sessionData, 'MCP commands cancelled due to nuclear fallback');
+
+    // Clear browser command buffer
+    sessionData.browserCommandBuffer.length = 0;
+
+    // Broadcast nuclear fallback event
+    this.broadcastToLiveListeners(
+      sessionName,
+      `Nuclear fallback triggered - all commands cancelled\r\n`,
+      "stdout",
+      "system"
+    );
+
+    log.warn(`Nuclear fallback triggered for session ${sessionName}: all MCP commands cancelled`);
+
+    return { success: true };
+  }
+
+  /**
+   * Get the last nuclear fallback reason for a session
+   * @param sessionName - SSH session name
+   * @returns Last fallback reason or undefined if no fallback occurred
+   */
+  getLastNuclearFallbackReason(sessionName: string): string | undefined {
+    this.validateSessionName(sessionName);
+    const timeoutInfo = this.nuclearTimeoutMap.get(sessionName);
+    return timeoutInfo?.lastFallbackReason;
+  }
+
+  /**
+   * Clear nuclear timeout for a session
+   * @param sessionName - SSH session name
+   */
+  clearNuclearTimeout(sessionName: string): void {
+    this.validateSessionName(sessionName);
+    const timeoutInfo = this.nuclearTimeoutMap.get(sessionName);
+
+    if (timeoutInfo?.timeoutHandle) {
+      clearTimeout(timeoutInfo.timeoutHandle);
+      timeoutInfo.timeoutHandle = undefined;
+    }
+
+    // Reset timeout info but keep history
+    if (timeoutInfo) {
+      timeoutInfo.hasTriggered = false;
+      timeoutInfo.startTime = Date.now();
+      timeoutInfo.lastFallbackReason = undefined;
+    }
+  }
+
+  /**
+   * Get nuclear timeout start time for a session
+   * @param sessionName - SSH session name
+   * @returns Start time in milliseconds or undefined if no timeout set
+   */
+  getNuclearTimeoutStartTime(sessionName: string): number | undefined {
+    this.validateSessionName(sessionName);
+    const timeoutInfo = this.nuclearTimeoutMap.get(sessionName);
+    return timeoutInfo?.startTime;
+  }
+
+  /**
+   * Check if SSH session is healthy and responsive
+   * @param sessionName - SSH session name
+   * @returns True if session is healthy
+   */
+  isSessionHealthy(sessionName: string): boolean {
+    this.validateSessionName(sessionName);
+
+    const sessionData = this.connections.get(sessionName);
+    if (!sessionData) {
+      return false;
+    }
+
+    // Check if SSH client is connected
+    // Note: SSH2 Client doesn't have a public 'destroyed' property, so we check if client exists
+    if (!sessionData.client) {
+      return false;
+    }
+
+    // Check connection status
+    if (sessionData.connection.status !== ConnectionStatus.CONNECTED) {
+      return false;
+    }
+
+    // Check if nuclear fallback has been triggered
+    if (this.hasTriggeredNuclearFallback(sessionName)) {
+      return false;
+    }
+
+    // Session is healthy if client exists, is connected, and nuclear fallback hasn't triggered
+    return true;
   }
 
 }
