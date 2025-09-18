@@ -403,13 +403,52 @@ export class SSHConnectionManager implements ISSHConnectionManager {
 
         sessionData.shellChannel = channel;
 
-        // Simple initialization - just wait for shell to be ready
-        setTimeout(() => {
+        // Working PS1 configuration with deadlock prevention
+        let initOutput = "";
+        let ps1ConfigSent = false;
+        let postConfigOutput = '';
+
+        const initTimeout = setTimeout(() => {
+          // Prevent deadlock - resolve after 8 seconds no matter what
+          channel.removeListener("data", onInitData);
           sessionData.isShellReady = true;
           sessionData.initialPromptShown = true;
           this.setupShellHandlers(sessionData);
           resolve();
-        }, 1000); // Give shell 1 second to initialize
+        }, 8000);
+
+        const onInitData = (data: Buffer): void => {
+          const newData = data.toString();
+          // Filter out contamination
+          if (!newData.includes('null 2>&1')) {
+            initOutput += newData;
+          }
+
+          // Look for initial prompt to configure PS1
+          if (!ps1ConfigSent && this.detectShellPrompt(initOutput)) {
+            ps1ConfigSent = true;
+            const ps1ConfigCmd = `export PS1='[\\u@\\h \\W]\\$ '\n`;
+            channel.write(ps1ConfigCmd);
+            postConfigOutput = '';
+          } else if (ps1ConfigSent) {
+            // Accumulate post-PS1 output
+            if (!newData.includes('null 2>&1')) {
+              postConfigOutput += newData;
+            }
+
+            // Check for bracket format prompt after PS1 config
+            if (postConfigOutput.includes('[') && postConfigOutput.includes(']$')) {
+              clearTimeout(initTimeout);
+              channel.removeListener("data", onInitData);
+              sessionData.isShellReady = true;
+              sessionData.initialPromptShown = true;
+              this.setupShellHandlers(sessionData);
+              resolve();
+            }
+          }
+        };
+
+        channel.on("data", onInitData);
 
         channel.on("close", () => {
           sessionData.isShellReady = false;
@@ -420,7 +459,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
   }
 
   private detectShellPrompt(output: string): boolean {
-    // Enhanced shell prompt detection - CRITICAL FIX for MCP command cancellation timing
+    // Enhanced shell prompt detection - handles both default and bracket format prompts
     const lines = output.split("\n");
     const lastLine = lines[lines.length - 1] || "";
     const secondLastLine = lines[lines.length - 2] || "";
@@ -432,6 +471,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       />\s*$/, // > at end of line
       /[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+.*[$#>]\s*$/, // user@host...$ pattern
       /\[[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+.*\][$#>]\s*$/, // [user@host...]$ pattern
+      /\[[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+\s+[^\]]*\]\$\s*$/, // [user@host path]$ pattern (with spaces)
     ];
 
     // Check if any line ends with a prompt pattern
@@ -441,10 +481,17 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       }
     }
 
-    // CRITICAL FIX: Remove false positive trigger that was causing MCP commands to complete prematurely
-    // The old code checked if output.includes("$ ") anywhere in the output, which would match
-    // the initial prompt from when the command was executed, causing immediate false completion
-    // Now we ONLY check if the output ENDS with proper prompt patterns
+    // FALLBACK: Also check for prompt patterns with carriage returns (CRLF handling)
+    // The terminal output might have \r\n line endings that affect pattern matching
+    const lastLineClean = lastLine.replace(/\r/g, '').trim();
+    const secondLastLineClean = secondLastLine.replace(/\r/g, '').trim();
+
+    for (const pattern of promptPatterns) {
+      if (pattern.test(lastLineClean) || pattern.test(secondLastLineClean)) {
+        return true;
+      }
+    }
+
     return false;
   }
 
@@ -615,15 +662,11 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     if (options.source !== undefined) {
       this.validateCommandSource(options.source);
     }
-    
+
     const sessionData = this.getValidatedSession(connectionName);
 
-    // Require shell session to be ready for session state persistence
-    if (!sessionData.isShellReady || !sessionData.shellChannel) {
-      throw new Error(
-        `Shell session not ready for connection '${connectionName}'. Cannot maintain session state without active shell.`,
-      );
-    }
+    // For MCP commands, we don't need shell session readiness since we use exec()
+    // Only browser/WebSocket commands need the persistent shell session
 
     return new Promise((resolve, reject) => {
       // SECURITY FIX: Check queue size limit to prevent DoS attacks
@@ -722,13 +765,8 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       options: CommandOptions;
     },
   ): void {
-    if (!sessionData.shellChannel) {
-      commandEntry.reject(new Error("Shell channel not available"));
-      // Clear execution flag and process next command
-      sessionData.isCommandExecuting = false;
-      this.processCommandQueue(sessionData);
-      return;
-    }
+    // MODERN APPROACH: Use exec() for reliable command completion detection
+    // This avoids the unreliable prompt parsing approach
 
     // Prevent shell-terminating commands
     const trimmedCommand = commandEntry.command.trim();
@@ -745,48 +783,134 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     }
 
     const executionStartTime = Date.now();
-    sessionData.currentCommand = {
-      command: commandEntry.command,
-      resolve: commandEntry.resolve,
-      reject: commandEntry.reject,
-      options: commandEntry.options,
-      stdout: "",
-      stderr: "",
-      startTime: executionStartTime,
-    };
-
-    // ARCHITECTURAL FIX: Remove temporary data handler - permanent handler now handles completion
-    // The permanent handler in setupShellHandlers() accumulates output and triggers completion
-
-    // Add timeout mechanism
     const timeoutMs = commandEntry.options.timeout || 15000;
-    const timeoutHandle = setTimeout(() => {
-      if (sessionData.currentCommand) {
+
+    // Use exec() for reliable completion detection via close events
+    sessionData.client.exec(commandEntry.command, (err, stream) => {
+      if (err) {
+        commandEntry.reject(err);
+        sessionData.isCommandExecuting = false;
+        this.processCommandQueue(sessionData);
+        return;
+      }
+
+      let stdout = "";
+      let stderr = "";
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+      // Set timeout
+      timeoutHandle = setTimeout(() => {
+        stream.destroy();
         commandEntry.reject(
           new Error(
             `Command '${commandEntry.command}' timed out after ${timeoutMs}ms`,
           ),
         );
-        sessionData.currentCommand = undefined;
+        sessionData.isCommandExecuting = false;
+        this.processCommandQueue(sessionData);
+      }, timeoutMs);
+
+      // EVENT-BASED COMPLETION DETECTION - The reliable approach
+      stream.on('close', (exitCode: number) => {
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+        }
+
+        const executionEndTime = Date.now();
+        const duration = executionEndTime - executionStartTime;
+
+        // Create command result
+        const result: CommandResult = {
+          stdout: stdout.trim(),
+          stderr: stderr.trim(),
+          exitCode: exitCode || 0,
+        };
+
+        // Broadcast to browsers for real-time display
+        const fullOutput = stdout + (stderr ? '\n' + stderr : '');
+        if (fullOutput.trim()) {
+          this.broadcastToLiveListeners(
+            sessionData.connection.name,
+            fullOutput,
+            "stdout",
+            commandEntry.options.source
+          );
+
+          this.storeInHistory(
+            sessionData.connection.name,
+            fullOutput,
+            "stdout",
+            commandEntry.options.source
+          );
+        }
+
+        // Record in command history
+        const historyEntry: CommandHistoryEntry = {
+          command: commandEntry.command,
+          timestamp: executionStartTime,
+          duration,
+          exitCode: exitCode || 0,
+          status: (exitCode || 0) === 0 ? "success" : "failure",
+          sessionName: sessionData.connection.name,
+          source: commandEntry.options.source || "claude",
+        };
+
+        sessionData.commandHistory.push(historyEntry);
+        if (sessionData.commandHistory.length > SSHConnectionManager.MAX_COMMAND_HISTORY_SIZE) {
+          sessionData.commandHistory.shift();
+        }
+
+        // Notify history listeners
+        sessionData.commandHistoryListeners.forEach((listener) => {
+          try {
+            listener.callback(historyEntry);
+          } catch (error) {
+            // Silent error handling
+          }
+        });
+
+        // Complete the command
+        commandEntry.resolve(result);
+
         // Clear execution flag and process next command
         sessionData.isCommandExecuting = false;
         this.processCommandQueue(sessionData);
-      }
-    }, timeoutMs);
+      });
 
-    // Store timeout handle in current command
-    if (sessionData.currentCommand) {
-      sessionData.currentCommand.timeoutHandle = timeoutHandle;
-    }
+      // Collect stdout
+      stream.on('data', (data: Buffer) => {
+        stdout += data.toString();
+        // Reset timeout on data activity
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+          timeoutHandle = setTimeout(() => {
+            stream.destroy();
+            commandEntry.reject(
+              new Error(
+                `Command '${commandEntry.command}' timed out after ${timeoutMs}ms`,
+              ),
+            );
+            sessionData.isCommandExecuting = false;
+            this.processCommandQueue(sessionData);
+          }, timeoutMs);
+        }
+      });
 
-    // Let SSH shell provide natural prompts - no artificial injection
-    // The shell naturally provides: prompt → command echo → output → next prompt
-    
-    // Command submission tracking - echo suppression handled in browser terminal handler
-    
-    // Send the command as-is (the shell will still echo it, but that will be filtered by echo suppression)
-    const command = commandEntry.command + "\n";
-    sessionData.shellChannel.write(command);
+      // Collect stderr
+      stream.stderr?.on('data', (data: Buffer) => {
+        stderr += data.toString();
+      });
+
+      // Handle stream errors
+      stream.on('error', (error: Error) => {
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+        }
+        commandEntry.reject(error);
+        sessionData.isCommandExecuting = false;
+        this.processCommandQueue(sessionData);
+      });
+    });
   }
 
   private completeSimpleCommand(
