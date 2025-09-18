@@ -385,29 +385,13 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     sessionData: SessionData,
   ): Promise<void> {
     return new Promise((resolve, reject) => {
-      // Configure SSH PTY for optimal terminal behavior
-      // CRITICAL FIX: Configure PTY modes to prevent double echo and prompt concatenation
+      // Simple PTY configuration - no complex PS1 bullshit
       const ptyOptions = {
         term: 'xterm-256color',
         cols: 80,
         rows: 24,
-        modes: {
-          // ECHO control - enable controlled echo to prevent command duplication
-          ECHO: 1,        // Enable local echo (SSH shell expects this)
-          ECHOE: 1,       // Enable echo erase
-          ECHOK: 1,       // Enable echo kill  
-          ECHONL: 0,      // Disable echo newline only
-          ICANON: 1,      // Canonical mode for line-by-line input (not raw)
-          // Line ending handling - critical for proper terminal behavior
-          ICRNL: 1,       // Map CR to NL on input
-          ONLCR: 1,       // Map NL to CR-NL on output
-          // Additional cleanup modes
-          OPOST: 1,       // Enable output processing
-        },
-        // DOUBLE PROMPT BUG FIX: Do NOT set PS1 in env - let shell initialize naturally
         env: {
-          'TERM': 'xterm-256color',
-          'SHELL': '/bin/bash'     // Ensure bash shell for consistency
+          'TERM': 'xterm-256color'
         }
       };
 
@@ -418,95 +402,14 @@ export class SSHConnectionManager implements ISSHConnectionManager {
         }
 
         sessionData.shellChannel = channel;
-        let initOutput = "";
 
-        let ps1ConfigSent = false;
-        let ps1ConfigComplete = false;
-        let postConfigOutput = '';
-
-        const onData = (data: Buffer): void => {
-          const newData = data.toString();
-          // CRITICAL FIX: Filter out null 2>&1 contamination during initialization
-          if (!newData.includes('null 2>&1')) {
-            initOutput += newData;
-          } else {
-            log.debug('Filtered out null 2>&1 during shell initialization');
-          }
-
-          // Enhanced prompt detection with multiple patterns
-          const hasPrompt = this.detectShellPrompt(initOutput);
-
-          if (hasPrompt && !ps1ConfigSent) {
-            // First prompt detected - now configure PS1
-            ps1ConfigSent = true;
-            
-            // CRITICAL FIX: Use simple PS1 configuration without redirection
-            // Send PS1 setting directly - let prepareOutputForBrowser handle cleanup
-            const ps1ConfigCmd = `export PS1='[\\u@\\h \\W]\\$ '\n`;
-            channel.write(ps1ConfigCmd);
-            
-            // Reset output buffer to capture post-configuration output
-            postConfigOutput = '';
-            
-          } else if (ps1ConfigSent && !ps1ConfigComplete) {
-            // Accumulate output after PS1 configuration
-            // CRITICAL FIX: Also filter null 2>&1 from post-configuration output
-            if (!newData.includes('null 2>&1')) {
-              postConfigOutput += newData;
-            }
-            
-            // Wait for the PS1 configuration to complete (detect bracket format prompt)
-            if (this.detectBracketFormatPrompt(postConfigOutput)) {
-              ps1ConfigComplete = true;
-              channel.removeListener("data", onData);
-              
-              sessionData.isShellReady = true;
-              sessionData.initialPromptShown = true;
-              
-              // Short delay to let terminal stabilize, then setup handlers
-              setTimeout(() => {
-                this.setupShellHandlers(sessionData);
-                
-                // FIRST PROMPT FIX: Extract and store just the final bracket prompt
-                // This ensures the initial prompt is available for browser replay without over-filtering
-                if (postConfigOutput.trim() && !postConfigOutput.includes('null 2>&1')) {
-                  // Extract the final bracket prompt BEFORE applying full cleaning
-                  // This preserves the prompt while still filtering out PS1 configuration
-                  const bracketPromptMatch = postConfigOutput.match(/\[[^\]]+\]\$\s*/);
-                  if (bracketPromptMatch) {
-                    let finalPrompt = bracketPromptMatch[0];
-                    // Apply ONLY basic control sequence cleaning, not PS1 filtering
-                    finalPrompt = finalPrompt
-                      .replace(/\u001b\[[0-9;?]*[a-zA-Zlh]/g, '') // Remove ANSI sequences including bracketed paste mode
-                      .replace(/\[[?][0-9]+[lh]/g, '') // Remove bracketed paste mode sequences like [?2004l
-                      .replace(/\u001b\][^\u0007\u001b]*?\u0007?/g, '') // Remove OSC sequences
-                      .replace(/\r(?!\n)/g, ''); // Remove isolated CR
-                    // Initial prompt successfully extracted and cleaned for history replay
-                    this.storeInHistory(
-                      sessionData.connection.name,
-                      finalPrompt,
-                      "stdout",
-                      'system'
-                    );
-                  }
-                  // If no bracket prompt found, initialization continues normally without initial prompt in history
-                }
-                
-                resolve();
-              }, 100);
-            }
-          }
-        };
-
-        channel.on("data", onData);
-
-        // TRIPLE PROMPT BUG FIX: Do NOT send initial newline to trigger prompt
-        // This was causing the first unnecessary prompt display
-        // Let the shell initialize naturally without artificial prompt triggering
-        
-        // The shell will naturally show its prompt during initialization
-        // We don't need to force it with a newline character
-        // This eliminates the first source of duplicate prompts
+        // Simple initialization - just wait for shell to be ready
+        setTimeout(() => {
+          sessionData.isShellReady = true;
+          sessionData.initialPromptShown = true;
+          this.setupShellHandlers(sessionData);
+          resolve();
+        }, 1000); // Give shell 1 second to initialize
 
         channel.on("close", () => {
           sessionData.isShellReady = false;
@@ -545,17 +448,6 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     return false;
   }
 
-  private detectBracketFormatPrompt(output: string): boolean {
-    // Specifically detect bracket format prompts: [user@host path]$
-    const lines = output.split("\n");
-    const lastLine = lines[lines.length - 1] || "";
-    const secondLastLine = lines[lines.length - 2] || "";
-
-    // Bracket format pattern: [user@host path]$
-    const bracketPattern = /\[[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+[^\]]*\]\$\s*$/;
-    
-    return bracketPattern.test(lastLine) || bracketPattern.test(secondLastLine);
-  }
 
   /**
    * Get cached regex patterns for a command, creating them if necessary
