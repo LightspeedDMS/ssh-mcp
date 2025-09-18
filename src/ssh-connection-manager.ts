@@ -98,6 +98,7 @@ interface SessionData {
   browserCommandBuffer: BrowserCommandEntry[];
   commandQueue: QueuedCommand[];
   isCommandExecuting: boolean;
+  currentDirectory?: string; // Cached current working directory for prompt generation
 }
 
 // Terminal output streaming interfaces
@@ -185,11 +186,42 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     if (!sessionData) return;
 
     // Apply source-aware output processing
-    const processedData = this.prepareOutputForBrowserWithSource(data, source);
-    
+    const processedData = this.prepareOutputForBrowserWithSource(data, source, false);
+
     const outputEntry: TerminalOutputEntry = {
       timestamp: Date.now(),
       output: processedData,
+      stream,
+      rawOutput: data,
+      preserveFormatting: true,
+      vt100Compatible: true,
+      encoding: "utf8",
+      source,
+    };
+
+    // Only notify live listeners - don't store in history
+    sessionData.outputListeners.forEach((listener) => {
+      try {
+        listener.callback(outputEntry);
+      } catch (error) {
+        log.warn(`Failed to notify terminal listener for session ${sessionName}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    });
+  }
+
+  // Send live updates to connected browsers without any processing (for synthetic prompts)
+  private broadcastToLiveListenersRaw(
+    sessionName: string,
+    data: string,
+    stream: "stdout" | "stderr" = "stdout",
+    source?: import("./types.js").CommandSource,
+  ): void {
+    const sessionData = this.connections.get(sessionName);
+    if (!sessionData) return;
+
+    const outputEntry: TerminalOutputEntry = {
+      timestamp: Date.now(),
+      output: data, // No processing for synthetic prompts
       stream,
       rawOutput: data,
       preserveFormatting: true,
@@ -219,11 +251,39 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     if (!sessionData) return;
 
     // Apply source-aware output processing
-    const processedData = this.prepareOutputForBrowserWithSource(data, source);
-    
+    const processedData = this.prepareOutputForBrowserWithSource(data, source, false);
+
     const outputEntry: TerminalOutputEntry = {
       timestamp: Date.now(),
       output: processedData,
+      stream,
+      rawOutput: data,
+      preserveFormatting: true,
+      vt100Compatible: true,
+      encoding: "utf8",
+      source,
+    };
+
+    // Only store in history buffer (keep last MAX_OUTPUT_BUFFER_SIZE entries)
+    sessionData.outputBuffer.push(outputEntry);
+    if (sessionData.outputBuffer.length > SSHConnectionManager.MAX_OUTPUT_BUFFER_SIZE) {
+      sessionData.outputBuffer.shift();
+    }
+  }
+
+  // Store complete terminal interaction in history without processing (for synthetic prompts)
+  private storeInHistoryRaw(
+    sessionName: string,
+    data: string,
+    stream: "stdout" | "stderr" = "stdout",
+    source?: import("./types.js").CommandSource,
+  ): void {
+    const sessionData = this.connections.get(sessionName);
+    if (!sessionData) return;
+
+    const outputEntry: TerminalOutputEntry = {
+      timestamp: Date.now(),
+      output: data, // No processing for synthetic prompts
       stream,
       rawOutput: data,
       preserveFormatting: true,
@@ -503,7 +563,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       }, timeoutMs);
 
       // EVENT-BASED COMPLETION DETECTION - The reliable approach
-      stream.on('close', (exitCode: number) => {
+      stream.on('close', async (exitCode: number) => {
         if (timeoutHandle) {
           clearTimeout(timeoutHandle);
         }
@@ -518,20 +578,21 @@ export class SSHConnectionManager implements ISSHConnectionManager {
           exitCode: exitCode || 0,
         };
 
-        // Broadcast to browsers for real-time display
-        const fullOutput = stdout + (stderr ? '\n' + stderr : '');
-        if (fullOutput.trim()) {
-          this.broadcastToLiveListeners(
-            sessionData.connection.name,
-            fullOutput,
-            "stdout",
-            commandEntry.options.source
-          );
+        // Update cached directory if command might have changed it
+        if (this.isDirectoryChangingCommand(commandEntry.command)) {
+          sessionData.currentDirectory = undefined; // Clear cache to force refresh
+        }
 
-          this.storeInHistory(
-            sessionData.connection.name,
+        // Broadcast to browsers for real-time display with synthetic prompts
+        const fullOutput = stdout + (stderr ? '\n' + stderr : '');
+        console.log(`✨ EXEC OUTPUT: command="${commandEntry.command}", source="${commandEntry.options.source}", output="${fullOutput.trim()}"`);
+        if (fullOutput.trim()) {
+          console.log(`🚀 CALLING broadcastCommandWithPrompt`);
+          // Generate synthetic prompt for browser commands (user/claude sources)
+          await this.broadcastCommandWithPrompt(
+            sessionData,
+            commandEntry.command,
             fullOutput,
-            "stdout",
             commandEntry.options.source
           );
         }
@@ -802,6 +863,172 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     };
   }
 
+  /**
+   * Broadcast command output with synthetic trailing prompt for browser display
+   * This addresses the missing prompt issue in exec()-only execution model
+   */
+  private async broadcastCommandWithPrompt(
+    sessionData: SessionData,
+    command: string,
+    output: string,
+    source?: import("./types.js").CommandSource
+  ): Promise<void> {
+    console.log(`🔍 broadcastCommandWithPrompt: source="${source}", command="${command}"`);
+
+    const shouldGeneratePrompt = (
+      source === 'user' || source === 'claude'
+    );
+
+    console.log(`🎯 shouldGeneratePrompt=${shouldGeneratePrompt} (source="${source}")`);
+
+    // First broadcast the command output
+    this.broadcastToLiveListeners(
+      sessionData.connection.name,
+      output,
+      "stdout",
+      source
+    );
+
+    this.storeInHistory(
+      sessionData.connection.name,
+      output,
+      "stdout",
+      source
+    );
+
+    // Then broadcast trailing prompt after the output (ready for next command)
+    if (shouldGeneratePrompt) {
+      console.log(`📝 GENERATING SYNTHETIC TRAILING PROMPT after command: "${command}"`);
+      // Generate synthetic trailing prompt for browser display
+      const prompt = await this.generateSyntheticPrompt(sessionData);
+
+      // Broadcast trailing prompt (bypass filtering since it's synthetic)
+      this.broadcastToLiveListenersRaw(
+        sessionData.connection.name,
+        prompt,
+        "stdout",
+        source
+      );
+
+      this.storeInHistoryRaw(
+        sessionData.connection.name,
+        prompt,
+        "stdout",
+        source
+      );
+    }
+  }
+
+  /**
+   * Generate synthetic trailing prompt for exec()-only execution model
+   * Format: [username@host currentdir]$ (ready for next command)
+   */
+  private async generateSyntheticPrompt(
+    sessionData: SessionData
+  ): Promise<string> {
+    const username = sessionData.connection.username;
+    const host = sessionData.connection.host;
+
+    // Get current directory, using cached value or querying pwd
+    let currentDir = sessionData.currentDirectory;
+
+    if (!currentDir) {
+      try {
+        // Execute pwd to get current directory
+        const pwdResult = await this.executeCommandSilent(sessionData, 'pwd');
+        currentDir = pwdResult.stdout.trim() || '~';
+
+        // Cache the directory for future use
+        sessionData.currentDirectory = currentDir;
+      } catch (error) {
+        log.debug(`Failed to get current directory: ${error instanceof Error ? error.message : String(error)}`);
+        currentDir = '~'; // Fallback to home directory
+      }
+    }
+
+    // Convert absolute path to ~-relative path for display
+    const displayDir = this.formatDirectoryForPrompt(currentDir, username);
+
+    // Generate trailing prompt in bracket format: [username@host dir]$
+    const syntheticPrompt = `[${username}@${host} ${displayDir}]$ `;
+    return syntheticPrompt;
+  }
+
+  /**
+   * Execute a command silently without broadcasting to browsers
+   * Used for internal operations like getting current directory
+   */
+  private executeCommandSilent(
+    sessionData: SessionData,
+    command: string
+  ): Promise<CommandResult> {
+    return new Promise((resolve, reject) => {
+      sessionData.client.exec(command, (err, stream) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+
+        let stdout = "";
+        let stderr = "";
+
+        const timeoutHandle = setTimeout(() => {
+          stream.destroy();
+          reject(new Error(`Silent command '${command}' timed out after 5000ms`));
+        }, 5000);
+
+        stream.on('close', (exitCode: number) => {
+          clearTimeout(timeoutHandle);
+          resolve({
+            stdout: stdout.trim(),
+            stderr: stderr.trim(),
+            exitCode: exitCode || 0,
+          });
+        });
+
+        stream.on('data', (data: Buffer) => {
+          stdout += data.toString();
+        });
+
+        stream.stderr?.on('data', (data: Buffer) => {
+          stderr += data.toString();
+        });
+
+        stream.on('error', (error: Error) => {
+          clearTimeout(timeoutHandle);
+          reject(error);
+        });
+      });
+    });
+  }
+
+  /**
+   * Format directory path for prompt display
+   * Converts absolute paths to ~-relative format where appropriate
+   */
+  private formatDirectoryForPrompt(absolutePath: string, username: string): string {
+    if (!absolutePath) {
+      return '~';
+    }
+
+    // Convert /home/username to ~
+    const homePattern = new RegExp(`^/home/${username}(?:/(.*))?$`);
+    const homeMatch = absolutePath.match(homePattern);
+
+    if (homeMatch) {
+      const subPath = homeMatch[1];
+      return subPath ? `~/${subPath}` : '~';
+    }
+
+    // For root directory
+    if (absolutePath === '/') {
+      return '/';
+    }
+
+    // For other absolute paths, keep as-is
+    return absolutePath;
+  }
+
   addCommandHistoryListener(
     sessionName: string,
     callback: (entry: CommandHistoryEntry) => void,
@@ -1034,9 +1261,13 @@ export class SSHConnectionManager implements ISSHConnectionManager {
   private prepareOutputForBrowserWithSource(
     output: string,
     source?: import("./types.js").CommandSource,
+    isSyntheticPrompt: boolean = false,
   ): string {
     if (source === 'system') {
       // System output passes through unchanged to preserve formatting
+      return output;
+    } else if (isSyntheticPrompt) {
+      // Synthetic prompts should not be filtered - they're already correctly formatted
       return output;
     } else {
       // All commands get standard browser preparation
@@ -1607,6 +1838,25 @@ export class SSHConnectionManager implements ISSHConnectionManager {
 
     // Session is healthy if client exists, is connected, and nuclear fallback hasn't triggered
     return true;
+  }
+
+  /**
+   * Check if a command is likely to change the current directory
+   * Used to invalidate cached directory information
+   */
+  private isDirectoryChangingCommand(command: string): boolean {
+    const trimmedCommand = command.trim().toLowerCase();
+
+    // Commands that change directory
+    return (
+      trimmedCommand.startsWith('cd ') ||
+      trimmedCommand === 'cd' ||
+      trimmedCommand.startsWith('pushd ') ||
+      trimmedCommand.startsWith('popd') ||
+      // Also include commands that might affect the shell state
+      trimmedCommand.includes('cd;') ||
+      trimmedCommand.includes('cd&&')
+    );
   }
 
 }
