@@ -135,9 +135,9 @@ describe("Story 1: Terminal Output Streaming - Focused E2E", () => {
       capturedOutputs.push({
         timestamp: outputEntry.timestamp,
         output: outputEntry.output,
-        stream: outputEntry.stream,
-        preserveFormatting: outputEntry.preserveFormatting,
-        vt100Compatible: outputEntry.vt100Compatible,
+        
+        
+        
       });
     };
 

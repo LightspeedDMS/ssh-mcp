@@ -51,11 +51,11 @@ class CIEnvironmentDiagnostic {
   async checkSSHService(): Promise<void> {
     await this.runCheck('SSH Service Running', async () => {
       try {
-        const result = execSync('ps aux | grep -E "[s]shd|[s]sh-agent"', { encoding: 'utf8' });
-        if (!result.trim()) {
+        const result = execSync('ps aux | grep -E "[s]shd|[s]sh-agent"', { });
+        if (!result.toString().trim()) {
           throw new Error('No SSH service processes found');
         }
-        console.log(`SSH processes: ${result.trim()}`);
+        console.log(`SSH processes: ${result.toString().trim()}`);
       } catch (error) {
         throw new Error(`SSH service check failed: ${error}`);
       }
@@ -85,7 +85,7 @@ class CIEnvironmentDiagnostic {
     await this.runCheck('SSH Localhost Connectivity', async () => {
       try {
         const result = execSync('ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no localhost echo "SSH_TEST_SUCCESS"', { 
-          encoding: 'utf8',
+          
           timeout: 10000 
         });
         

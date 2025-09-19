@@ -2,7 +2,7 @@
  * CRITICAL TRIPLE CRLF CONVERSION BUG FIX TEST
  * 
  * Bug: CRLF conversion happening THREE times instead of once:
- * 1. Line 720 in completeSimpleCommand: rawOutput.replace(/\n/g, "\r\n")
+ * 1. Line 720 in completeSimpleCommand: output.replace(/\n/g, "\r\n")
  * 2. Line 157 in broadcastToLiveListeners: data.replace(/\n/g, "\r\n") 
  * 3. Line 194 in storeInHistory: data.replace(/\n/g, "\r\n")
  * 

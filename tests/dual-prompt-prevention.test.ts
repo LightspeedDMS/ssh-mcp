@@ -42,8 +42,8 @@ describe('Dual Prompt Prevention - Root Cause Fix', () => {
     await new Promise(resolve => setTimeout(resolve, 2000));
 
     // Get complete terminal history from initialization
-    const history = manager.getTerminalHistory(sessionName);
-    const allOutput = history.map(entry => entry.rawOutput).join('');
+    const history = await manager.getTerminalHistory(sessionName);
+    const allOutput = history.map(entry => entry.output).join('');
     
     console.log('Raw shell initialization output:', JSON.stringify(allOutput));
 
@@ -78,7 +78,7 @@ describe('Dual Prompt Prevention - Root Cause Fix', () => {
     await new Promise(resolve => setTimeout(resolve, 2000));
 
     // Clear initial history to focus on command execution
-    const initialHistory = manager.getTerminalHistory(sessionName);
+    const initialHistory = await manager.getTerminalHistory(sessionName);
     console.log('Initial history length:', initialHistory.length);
 
     // Execute a simple command
@@ -87,10 +87,10 @@ describe('Dual Prompt Prevention - Root Cause Fix', () => {
     expect(result.stdout).toBe('test-command');
 
     // Get history from command execution
-    const commandHistory = manager.getTerminalHistory(sessionName);
+    const commandHistory = await manager.getTerminalHistory(sessionName);
     const recentOutput = commandHistory
       .slice(initialHistory.length) // Only new entries since command
-      .map(entry => entry.rawOutput)
+      .map(entry => entry.output)
       .join('');
     
     console.log('Command execution output:', JSON.stringify(recentOutput));
@@ -117,8 +117,8 @@ describe('Dual Prompt Prevention - Root Cause Fix', () => {
 
     await new Promise(resolve => setTimeout(resolve, 2000));
 
-    const history = manager.getTerminalHistory(sessionName);
-    const allOutput = history.map(entry => entry.rawOutput).join('');
+    const history = await manager.getTerminalHistory(sessionName);
+    const allOutput = history.map(entry => entry.output).join('');
 
     // Generic dual prompt pattern: any_user@any_host:path[any_user@any_host dir]$
     const genericDualPattern = /([a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+:[~\w/.[\]-]*)(\[[a-zA-Z0-9_.\s-]+@[a-zA-Z0-9_.-]+\s+[^\]]+\]\$)/g;
@@ -147,14 +147,14 @@ describe('Dual Prompt Prevention - Root Cause Fix', () => {
     await new Promise(resolve => setTimeout(resolve, 2000));
 
     // Get raw output (before prepareOutputForBrowser processing)
-    const history = manager.getTerminalHistory(sessionName);
-    const rawOutput = history.map(entry => entry.rawOutput).join('');
+    const history = await manager.getTerminalHistory(sessionName);
+    const output = history.map(entry => entry.output).join('');
     
-    console.log('Raw output for corruption analysis:', JSON.stringify(rawOutput));
+    console.log('Raw output for corruption analysis:', JSON.stringify(output));
 
     // The raw output itself should be clean - no corruption filtering should be needed
     // If shell initialization is fixed, raw output won't contain dual prompts
-    expect(rawOutput).not.toContain('jsbattig@localhost:~[jsbattig@localhost ~]$');
+    expect(output).not.toContain('jsbattig@localhost:~[jsbattig@localhost ~]$');
     
     // Verify that the issue is fixed at the source, not hidden by filtering
     const corruptionPatterns = [
@@ -163,7 +163,7 @@ describe('Dual Prompt Prevention - Root Cause Fix', () => {
     ];
     
     for (const pattern of corruptionPatterns) {
-      const matches = rawOutput.match(pattern) || [];
+      const matches = output.match(pattern) || [];
       expect(matches.length).toBe(0);
     }
   });

@@ -53,7 +53,7 @@ describe('Monitoring URL Failure Debug', () => {
       // Step 4: Check if web server is running
       console.log('\nStep 4: Checking for web server processes...');
       try {
-        const netstatOutput = execSync('netstat -tlnp 2>/dev/null | grep LISTEN | grep node || echo "No node processes listening"', { encoding: 'utf8' });
+        const netstatOutput = execSync('netstat -tlnp 2>/dev/null | grep LISTEN | grep node || echo "No node processes listening"', { });
         console.log(`Listening node processes:\n${netstatOutput}`);
       } catch (error) {
         console.log(`Could not check netstat: ${error}`);
@@ -62,8 +62,8 @@ describe('Monitoring URL Failure Debug', () => {
       // Step 5: Check for .ssh-mcp-server.port file
       console.log('\nStep 5: Checking for port file...');
       try {
-        const portFileContent = execSync('cat .ssh-mcp-server.port 2>/dev/null || echo "Port file not found"', { encoding: 'utf8' });
-        console.log(`Port file content: ${portFileContent.trim()}`);
+        const portFileContent = execSync('cat .ssh-mcp-server.port 2>/dev/null || echo "Port file not found"', { });
+        console.log(`Port file content: ${portFileContent.toString().trim()}`);
       } catch (error) {
         console.log(`Could not read port file: ${error}`);
       }

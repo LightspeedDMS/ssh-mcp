@@ -21,14 +21,14 @@ describe('DIRECT WEBSOCKET: Null Output Detection', () => {
     // Connect via MCP (this should trigger PS1 configuration)
     const connectResult = execSync(`
       echo '{"method": "ssh_connect", "params": {"name": "websocket-test", "host": "localhost", "username": "jsbattig", "keyFilePath": "~/.ssh/id_ed25519"}}' | npx mcp-client-stdio src/index.ts
-    `, { encoding: 'utf-8', timeout: 15000 });
+    `, {  timeout: 15000 });
     
     expect(connectResult).toContain('"success":true');
 
     // Step 2: Get monitoring URL
     const urlResult = execSync(`
       echo '{"method": "ssh_get_monitoring_url", "params": {"sessionName": "websocket-test"}}' | npx mcp-client-stdio src/index.ts
-    `, { encoding: 'utf-8', timeout: 5000 });
+    `, {  timeout: 5000 });
     
     const urlMatch = urlResult.match(/"monitoringUrl":"([^"]+)"/);
     expect(urlMatch).toBeTruthy();
@@ -69,7 +69,7 @@ describe('DIRECT WEBSOCKET: Null Output Detection', () => {
         try {
           execSync(`
             echo '{"method": "ssh_disconnect", "params": {"sessionName": "websocket-test"}}' | npx mcp-client-stdio src/index.ts
-          `, { encoding: 'utf-8', timeout: 5000 });
+          `, {  timeout: 5000 });
         } catch (error) {
           console.warn('Cleanup warning:', error);
         }
@@ -84,7 +84,7 @@ describe('DIRECT WEBSOCKET: Null Output Detection', () => {
         setTimeout(() => {
           execSync(`
             echo '{"method": "ssh_exec", "params": {"sessionName": "websocket-test", "command": "whoami"}}' | npx mcp-client-stdio src/index.ts
-          `, { encoding: 'utf-8', timeout: 10000 });
+          `, {  timeout: 10000 });
         }, 1000);
       });
 

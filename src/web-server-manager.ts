@@ -28,11 +28,7 @@ interface SessionState {
   }>;
 }
 
-interface RegexPatterns {
-  promptPattern: RegExp;
-  standalonePattern: RegExp;
-  middlePattern: RegExp;
-}
+// REMOVED: RegexPatterns interface (no longer used after echo suppression removal)
 
 /**
  * Pure Web Server Manager - Handles only HTTP/WebSocket functionality
@@ -52,9 +48,8 @@ export class WebServerManager {
   
   // Terminal state synchronization
   private sessionStates: Map<string, SessionState> = new Map();
-  
-  // Pattern cache for performance optimization
-  private patternCache: Map<string, RegexPatterns> = new Map();
+
+  // REMOVED: Pattern cache (no longer used after echo suppression removal)
   
   // Echo suppression handled in browser terminal handler
 
@@ -380,30 +375,13 @@ export class WebServerManager {
           // ARCHITECTURAL FIX: Apply WebSocket command echo suppression
           let filteredOutput = entry.output;
           
-          // For WebSocket-initiated commands (source: 'user'), apply aggressive echo suppression
-          if (entry.source === 'user') {
-            try {
-              // Get current command from session to suppress its echo
-              const sessionState = this.getOrCreateSessionState(sessionName);
-              if (sessionState?.commandHistory && Array.isArray(sessionState.commandHistory)) {
-                const executingCommands = sessionState.commandHistory.filter(cmd => 
-                  cmd && typeof cmd.completed === 'boolean' && !cmd.completed  // Safe property access
-                );
-                
-                if (executingCommands.length > 0) {
-                  const currentCommand = executingCommands[executingCommands.length - 1];
-                  if (currentCommand?.command && typeof currentCommand.command === 'string' && currentCommand.command.trim().length > 0) {
-                    filteredOutput = this.suppressWebSocketCommandEcho(filteredOutput, currentCommand.command);
-                  }
-                }
-              }
-            } catch (error) {
-              // Log error but don't break WebSocket connection
-              console.error(`[WebSocket Echo Suppression Error] Session: ${sessionName}, Error:`, error);
-              // Use original output if suppression fails
-              filteredOutput = entry.output;
-            }
-          }
+          // CRITICAL FIX: Do NOT apply echo suppression to 'user' source commands
+          // The SSH manager's broadcastCommandWithPrompt already formats these correctly
+          // with the proper command echo: [user@host dir]$ command\r\nresult
+          // Applying echo suppression here removes the command entirely, causing display issues
+
+          // For WebSocket-initiated commands, the SSH manager handles echo formatting
+          // No additional processing needed here - use the output as-is
           // For MCP commands (source: 'claude') and system output, pass through unchanged
           
           ws.send(
@@ -998,7 +976,7 @@ export class WebServerManager {
 
   /**
    * Send formatted terminal history with proper terminal session format:
-   * prompt + command + output + prompt for each historical command
+   * Always starts with initial prompt, then history, then final prompt if needed
    */
   private sendFormattedTerminalHistory(ws: import("ws").WebSocket, sessionName: string): void {
     if (!this.sshManager.hasSession(sessionName) || ws.readyState !== ws.OPEN) {
@@ -1006,14 +984,15 @@ export class WebServerManager {
     }
 
     try {
-      // Get terminal output history - no need for command history since we're using raw terminal output
+      // Get terminal output history and session connection info
       const terminalHistory = this.sshManager.getTerminalHistory(sessionName);
-
-      // Get session connection info for prompt construction
       const connectionInfo = this.sshManager.getSessionConnectionInfo(sessionName);
+
       if (!connectionInfo) {
         log.warn(`Cannot get connection info for ${sessionName} - using fallback prompt format`);
-        // Fall back to simple history replay if connection info unavailable
+        // Fall back to simple history replay with generic initial prompt
+        this.sendInitialPrompt(ws, sessionName, 'user@localhost', '~');
+
         terminalHistory.forEach((entry) => {
           if (ws.readyState === ws.OPEN) {
             ws.send(
@@ -1027,43 +1006,47 @@ export class WebServerManager {
             );
           }
         });
+
+        // Send final prompt if no history
+        if (terminalHistory.length === 0) {
+          this.sendFinalPrompt(ws, sessionName, 'user@localhost', '~');
+        }
         return;
       }
 
-      // CRITICAL FIX: Send raw terminal history directly without reconstructing
-      // The terminal history already contains the natural SSH shell output including
-      // command echoes, prompts, and responses. Reconstructing creates duplicates.
-      
-      // Simply send the stored terminal output entries in chronological order
-      // CRITICAL FIX: Ensure first command entry has proper prompt prefix
+      // TERMINAL SESSION FORMATTING: Send terminal history without additional processing
+      const { username, host } = connectionInfo;
+
+      // Send stored terminal output entries in chronological order (NO additional prompts)
       terminalHistory.forEach((entry) => {
         if (ws.readyState === ws.OPEN) {
-          let outputData = entry.output;
-          
-          // NUCLEAR FIX: Apply command echo filtering directly in WebSocket send
-          // This ensures filtering happens even if it was missed elsewhere in the pipeline
-          outputData = outputData.replace(/(\[[^\]]+\]\$\s+)([^\r\n]+)(\r\n)/g, '$1$3');
-          
-          // SURGICAL FIX: Remove automatic prompt prepending that causes echo duplication
-          // Browser commands already have proper prompt+command format stored in terminal history
-          // This logic was causing duplicate command display for browser-initiated commands
-          
+          // CRITICAL FIX: Do NOT modify the output data here
+          // The SSH manager already formatted it correctly with broadcastCommandWithPrompt
           ws.send(
             JSON.stringify({
               type: "terminal_output",
               sessionName,
               timestamp: new Date(entry.timestamp).toISOString(),
-              data: outputData,
+              data: entry.output, // Use output as-is from SSH manager
               source: entry.source,
             }),
           );
         }
       });
 
+      // CRITICAL FIX: Only send initial prompt if there's NO history at all
+      if (terminalHistory.length === 0) {
+        this.sendInitialPrompt(ws, sessionName, username + '@' + host, '~');
+      }
+
     } catch (error) {
       log.error(`Error sending formatted terminal history for session ${sessionName}`, error instanceof Error ? error : new Error(String(error)));
-      // Graceful degradation - fall back to simple terminal history
+      // Graceful degradation - fall back to simple history replay with minimal prompts
       const terminalHistory = this.sshManager.getTerminalHistory(sessionName);
+
+      // Always send initial prompt even in error case
+      this.sendInitialPrompt(ws, sessionName, 'user@localhost', '~');
+
       terminalHistory.forEach((entry) => {
         if (ws.readyState === ws.OPEN) {
           ws.send(
@@ -1077,91 +1060,60 @@ export class WebServerManager {
           );
         }
       });
-    }
-  }
 
-  /**
-   * Get cached regex patterns for a command, creating them if necessary
-   * Optimizes performance by avoiding repeated regex creation
-   * @param command - The command to create patterns for
-   * @returns Cached regex patterns for echo suppression
-   */
-  private getCachedPatterns(command: string): RegexPatterns {
-    // Input validation and error boundaries
-    if (!command || typeof command !== 'string' || command.trim().length === 0) {
-      throw new Error(`Invalid command for pattern caching: ${command}`);
-    }
-
-    if (this.patternCache.has(command)) {
-      return this.patternCache.get(command)!;
-    }
-
-    try {
-      const escapedCommand = this.escapeRegex(command);
-      const patterns: RegexPatterns = {
-        promptPattern: new RegExp(`(\\[[^\\]]+\\]\\$\\s+)${escapedCommand}(\\r?\\n)`, 'g'),
-        standalonePattern: new RegExp(`^\\s*${escapedCommand}\\s*\\r?\\n`, 'gm'),
-        middlePattern: new RegExp(`\\r?\\n\\s*${escapedCommand}\\s*\\r?\\n`, 'g')
-      };
-
-      this.patternCache.set(command, patterns);
-      return patterns;
-    } catch (error) {
-      console.error(`[Pattern Cache Error] Failed to create patterns for command: ${command}`, error);
-      throw error;
-    }
-  }
-
-  /**
-   * Suppress command echo for WebSocket-initiated commands
-   * Prevents command duplication in browser terminals by removing command echoes
-   * @param output - Terminal output data
-   * @param command - The command that was executed
-   * @returns Processed output with command echo suppressed
-   */
-  private suppressWebSocketCommandEcho(output: string, command: string): string {
-    // Input validation
-    if (!output || typeof output !== 'string') {
-      return output || '';
-    }
-    
-    try {
-      let processedOutput = output;
-      const patterns = this.getCachedPatterns(command);
-      
-      // PERFORMANCE FIX: Reset regex lastIndex to prevent state issues with global regexes
-      patterns.promptPattern.lastIndex = 0;
-      patterns.standalonePattern.lastIndex = 0;
-      patterns.middlePattern.lastIndex = 0;
-      
-      // AGGRESSIVE SUPPRESSION: Remove command echo in multiple patterns
-      
-      // 1. Remove command after bracket prompt: "[user@host path]$ command\n" -> "[user@host path]$ \n"
-      processedOutput = processedOutput.replace(patterns.promptPattern, '$1$2');
-      
-      // 2. Remove standalone command lines: "command\n" -> ""
-      processedOutput = processedOutput.replace(patterns.standalonePattern, '');
-      
-      // 3. Remove command in middle of output: "\ncommand\n" -> "\n"
-      processedOutput = processedOutput.replace(patterns.middlePattern, '\r\n');
-      
-      // Log if suppression occurred for debugging
-      if (output !== processedOutput && output.includes(command)) {
-        console.debug(`[WebSocket Echo Suppression] Removed "${command}" echo from terminal output`);
+      // Send final prompt if no history in error case
+      if (terminalHistory.length === 0) {
+        this.sendFinalPrompt(ws, sessionName, 'user@localhost', '~');
       }
-      
-      return processedOutput;
-    } catch (error) {
-      console.error(`[Echo Suppression Error] Command: ${command}, Error:`, error);
-      // Return original output if suppression fails
-      return output;
     }
   }
 
   /**
-   * Escape special regex characters in command strings
+   * Send initial prompt when browser first connects
+   * Format: [username@host directory]$ (ready for first command)
    */
-  private escapeRegex(str: string): string {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  private sendInitialPrompt(ws: import("ws").WebSocket, sessionName: string, userHost: string, directory: string): void {
+    if (ws.readyState !== ws.OPEN) return;
+
+    const initialPrompt = `[${userHost} ${directory}]$ `;
+
+    ws.send(
+      JSON.stringify({
+        type: "terminal_output",
+        sessionName,
+        timestamp: new Date().toISOString(),
+        data: initialPrompt,
+        source: "system",
+      }),
+    );
   }
+
+  /**
+   * Send final prompt when no history exists
+   * Format: [username@host directory]$ (cursor ready for input)
+   */
+  private sendFinalPrompt(ws: import("ws").WebSocket, sessionName: string, userHost: string, directory: string): void {
+    if (ws.readyState !== ws.OPEN) return;
+
+    const finalPrompt = `[${userHost} ${directory}]$ `;
+
+    ws.send(
+      JSON.stringify({
+        type: "terminal_output",
+        sessionName,
+        timestamp: new Date().toISOString(),
+        data: finalPrompt,
+        source: "system",
+      }),
+    );
+  }
+
+  // REMOVED: getCachedPatterns method
+  // No longer needed since WebSocket echo suppression was removed
+
+  // REMOVED: suppressWebSocketCommandEcho method
+  // The SSH manager's broadcastCommandWithPrompt already handles command echo formatting correctly
+  // No additional echo suppression is needed in the WebSocket layer
+
+  // REMOVED: escapeRegex method (no longer used after echo suppression removal)
 }

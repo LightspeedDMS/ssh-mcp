@@ -41,12 +41,21 @@ export class TestEnvironmentConfig {
 
   /**
    * Generate expected terminal prompt format
-   * [username@hostname ~]$
+   * [username@hostname ~]$ (with space for command input when trailing)
    */
   static getExpectedPrompt(): string {
     const username = this.getTestUsername();
     const hostname = this.getTestHostname();
     return `[${username}@${hostname} ~]$`;
+  }
+
+  /**
+   * Generate expected trailing prompt format (with space for next command)
+   */
+  static getExpectedTrailingPrompt(): string {
+    const username = this.getTestUsername();
+    const hostname = this.getTestHostname();
+    return `[${username}@${hostname} ~]$ `;
   }
 
   /**

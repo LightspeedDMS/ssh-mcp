@@ -389,3 +389,4 @@ Based on successful regression testing workflow runs:
 - **Timeout Threshold**: 25 minutes (configured in workflow)
 - **Success Pattern**: Consistent 5-6 minute runtimes indicate healthy test suite
 - **Investigation Triggers**: Runtimes >8 minutes or failures require analysis
+- Every time you make a change in the MCP server, you have to ask me to restart/reconnect the server in the claude code session, unless the change is in the browser code, in which case a reload may be enough. After I reload the mcp server, you can execute your sequence so I verify manually. On the same token, you must always verify using villenele first when I report issues I see in the browser.

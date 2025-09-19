@@ -27,8 +27,8 @@ describe('Git Versioning Critical Files', () => {
     try {
       const trackedFiles = execSync('git ls-files static/terminal-input-handler.js', { 
         cwd: projectRoot,
-        encoding: 'utf8' 
-      }).trim();
+        
+      }).toString().trim();
       
       // If git ls-files returns the filename, it's tracked
       isTracked = trackedFiles === 'static/terminal-input-handler.js';

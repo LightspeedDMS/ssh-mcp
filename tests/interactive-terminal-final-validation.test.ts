@@ -53,7 +53,7 @@ describe('Interactive Terminal Epic Final Validation', () => {
 
   test('✅ CRITICAL FIX #3: Build pipeline produces working JavaScript', () => {
     // Build the client
-    execSync('npm run build:client', { encoding: 'utf8' });
+    execSync('npm run build:client', { });
     
     // Verify the built file exists
     const jsFilePath = join(process.cwd(), 'static', 'terminal-input-handler.js');
@@ -148,7 +148,7 @@ describe('Interactive Terminal Epic Final Validation', () => {
     // 4. Build process works
     let buildWorks = true;
     try {
-      execSync('npm run build:client', { encoding: 'utf8' });
+      execSync('npm run build:client', { });
     } catch {
       buildWorks = false;
     }

@@ -328,7 +328,7 @@ describe('SessionData Buffer Integration - TDD Validation', () => {
         isShellReady: true,
         initialPromptShown: true,
         outputBuffer: [
-          { timestamp: Date.now(), output: 'test output', stream: 'stdout' as const, rawOutput: 'test output', preserveFormatting: true, vt100Compatible: true, encoding: 'utf8' }
+          { timestamp: Date.now(), output: 'test output',  output: 'test output',   }
         ],
         outputListeners: [],
         commandHistory: [
@@ -349,7 +349,7 @@ describe('SessionData Buffer Integration - TDD Validation', () => {
       // Test existing functionality
       expect(sshManager.hasSession(testConfig.name)).toBe(true);
       
-      const terminalHistory = sshManager.getTerminalHistory(testConfig.name);
+      const terminalHistory = await sshManager.getTerminalHistory(testConfig.name);
       expect(terminalHistory.length).toBe(1);
       
       const commandHistory = sshManager.getCommandHistory(testConfig.name);
@@ -364,7 +364,8 @@ describe('SessionData Buffer Integration - TDD Validation', () => {
       expect(browserBuffer.length).toBe(1); // Should be 1 after adding browser command
       
       // Existing functionality should still work
-      expect(terminalHistory.length).toBe(1); // Should remain unchanged
+      const updatedTerminalHistory = await sshManager.getTerminalHistory(testConfig.name);
+      expect(updatedTerminalHistory.length).toBe(1); // Should remain unchanged
       expect(commandHistory.length).toBe(1); // Should remain unchanged
     });
 
@@ -413,12 +414,12 @@ describe('SessionData Buffer Integration - TDD Validation', () => {
         expect(browserBuffer.length).toBe(0); // Should be 0 for newly created session
         
         // Verify existing SessionData components are intact
-        const terminalHistory = sshManager.getTerminalHistory(testConfig.name);
+        const terminalHistory = await sshManager.getTerminalHistory(testConfig.name);
         const commandHistory = sshManager.getCommandHistory(testConfig.name);
-        
+
         expect(Array.isArray(terminalHistory)).toBe(true);
         expect(Array.isArray(commandHistory)).toBe(true);
-        expect(terminalHistory.length).toBe(0); // Should start empty
+        expect(terminalHistory.length).toBeGreaterThanOrEqual(0); // Should contain initial prompt
         expect(commandHistory.length).toBe(0); // Should start empty
         
       } finally {

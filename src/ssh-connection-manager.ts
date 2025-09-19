@@ -69,11 +69,6 @@ export interface ISSHConnectionManager {
 export interface TerminalOutputEntry {
   timestamp: number;
   output: string;
-  stream: "stdout" | "stderr";
-  rawOutput: string;
-  preserveFormatting: boolean;
-  vt100Compatible: boolean;
-  encoding: string;
   source?: import("./types.js").CommandSource;
 }
 
@@ -179,7 +174,6 @@ export class SSHConnectionManager implements ISSHConnectionManager {
   private broadcastToLiveListeners(
     sessionName: string,
     data: string,
-    stream: "stdout" | "stderr" = "stdout",
     source?: import("./types.js").CommandSource,
   ): void {
     const sessionData = this.connections.get(sessionName);
@@ -191,11 +185,6 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     const outputEntry: TerminalOutputEntry = {
       timestamp: Date.now(),
       output: processedData,
-      stream,
-      rawOutput: data,
-      preserveFormatting: true,
-      vt100Compatible: true,
-      encoding: "utf8",
       source,
     };
 
@@ -213,20 +202,16 @@ export class SSHConnectionManager implements ISSHConnectionManager {
   private broadcastToLiveListenersRaw(
     sessionName: string,
     data: string,
-    stream: "stdout" | "stderr" = "stdout",
     source?: import("./types.js").CommandSource,
   ): void {
     const sessionData = this.connections.get(sessionName);
-    if (!sessionData) return;
+    if (!sessionData) {
+      return;
+    }
 
     const outputEntry: TerminalOutputEntry = {
       timestamp: Date.now(),
       output: data, // No processing for synthetic prompts
-      stream,
-      rawOutput: data,
-      preserveFormatting: true,
-      vt100Compatible: true,
-      encoding: "utf8",
       source,
     };
 
@@ -244,7 +229,6 @@ export class SSHConnectionManager implements ISSHConnectionManager {
   private storeInHistory(
     sessionName: string,
     data: string,
-    stream: "stdout" | "stderr" = "stdout",
     source?: import("./types.js").CommandSource,
   ): void {
     const sessionData = this.connections.get(sessionName);
@@ -256,11 +240,6 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     const outputEntry: TerminalOutputEntry = {
       timestamp: Date.now(),
       output: processedData,
-      stream,
-      rawOutput: data,
-      preserveFormatting: true,
-      vt100Compatible: true,
-      encoding: "utf8",
       source,
     };
 
@@ -275,7 +254,6 @@ export class SSHConnectionManager implements ISSHConnectionManager {
   private storeInHistoryRaw(
     sessionName: string,
     data: string,
-    stream: "stdout" | "stderr" = "stdout",
     source?: import("./types.js").CommandSource,
   ): void {
     const sessionData = this.connections.get(sessionName);
@@ -284,11 +262,6 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     const outputEntry: TerminalOutputEntry = {
       timestamp: Date.now(),
       output: data, // No processing for synthetic prompts
-      stream,
-      rawOutput: data,
-      preserveFormatting: true,
-      vt100Compatible: true,
-      encoding: "utf8",
       source,
     };
 
@@ -585,9 +558,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
 
         // Broadcast to browsers for real-time display with synthetic prompts
         const fullOutput = stdout + (stderr ? '\n' + stderr : '');
-        console.log(`✨ EXEC OUTPUT: command="${commandEntry.command}", source="${commandEntry.options.source}", output="${fullOutput.trim()}"`);
         if (fullOutput.trim()) {
-          console.log(`🚀 CALLING broadcastCommandWithPrompt`);
           // Generate synthetic prompt for browser commands (user/claude sources)
           await this.broadcastCommandWithPrompt(
             sessionData,
@@ -679,9 +650,9 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     if (typeof source !== 'string') {
       throw new Error('Command source must be a string');
     }
-    
-    if (source !== 'user' && source !== 'claude') {
-      throw new Error('Invalid command source: must be "user" or "claude"');
+
+    if (source !== 'user' && source !== 'claude' && source !== 'system') {
+      throw new Error('Invalid command source: must be "user", "claude", or "system"');
     }
   }
 
@@ -804,7 +775,6 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     this.broadcastToLiveListeners(
       name,
       `Connection to ${sessionData.connection.host} closed`,
-      "stdout",
       "system"
     );
 
@@ -864,8 +834,8 @@ export class SSHConnectionManager implements ISSHConnectionManager {
   }
 
   /**
-   * Broadcast command output with synthetic trailing prompt for browser display
-   * This addresses the missing prompt issue in exec()-only execution model
+   * Broadcast complete command session including command echo and output
+   * This fixes the missing command echo issue by creating natural terminal session flow
    */
   private async broadcastCommandWithPrompt(
     sessionData: SessionData,
@@ -873,47 +843,42 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     output: string,
     source?: import("./types.js").CommandSource
   ): Promise<void> {
-    console.log(`🔍 broadcastCommandWithPrompt: source="${source}", command="${command}"`);
-
     const shouldGeneratePrompt = (
       source === 'user' || source === 'claude'
     );
 
-    console.log(`🎯 shouldGeneratePrompt=${shouldGeneratePrompt} (source="${source}")`);
-
-    // First broadcast the command output
-    this.broadcastToLiveListeners(
-      sessionData.connection.name,
-      output,
-      "stdout",
-      source
-    );
-
-    this.storeInHistory(
-      sessionData.connection.name,
-      output,
-      "stdout",
-      source
-    );
-
-    // Then broadcast trailing prompt after the output (ready for next command)
     if (shouldGeneratePrompt) {
-      console.log(`📝 GENERATING SYNTHETIC TRAILING PROMPT after command: "${command}"`);
-      // Generate synthetic trailing prompt for browser display
+      // COMMAND ECHO FIX: For exec() commands, create complete command sequence with echoes
+      // Format: [user@host dir]$ command\r\nresult
       const prompt = await this.generateSyntheticPrompt(sessionData);
 
-      // Broadcast trailing prompt (bypass filtering since it's synthetic)
+      // CRITICAL FIX: Normalize output line endings to CRLF for xterm.js compatibility
+      const normalizedOutput = output.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
+      const commandEcho = `${prompt}${command}\r\n${normalizedOutput}`;
+
+      // Broadcast as raw to bypass all filtering
       this.broadcastToLiveListenersRaw(
         sessionData.connection.name,
-        prompt,
-        "stdout",
+        commandEcho,
         source
       );
 
       this.storeInHistoryRaw(
         sessionData.connection.name,
-        prompt,
-        "stdout",
+        commandEcho,
+        source
+      );
+    } else {
+      // For system output, broadcast as before
+      this.broadcastToLiveListeners(
+        sessionData.connection.name,
+        output,
+        source
+      );
+
+      this.storeInHistory(
+        sessionData.connection.name,
+        output,
         source
       );
     }
@@ -1252,10 +1217,12 @@ export class SSHConnectionManager implements ISSHConnectionManager {
   
 
   /**
+   * ⚠️  CRITICAL WARNING: DO NOT REMOVE OR MODIFY THESE METHODS! ⚠️
    * Source-aware output preparation that applies different processing based on command source
+   * This method is essential for terminal formatting - removing it breaks terminal display
    * @param output - Raw SSH output data
    * @param source - Command source ('user' for WebSocket, 'claude' for MCP, 'system' for system output)
-   * @param sessionData - Session data containing current command info
+   * @param isSyntheticPrompt - Whether this is a synthetic prompt that should bypass filtering
    * @returns Processed output optimized for browser display
    */
   private prepareOutputForBrowserWithSource(
@@ -1269,14 +1236,90 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     } else if (isSyntheticPrompt) {
       // Synthetic prompts should not be filtered - they're already correctly formatted
       return output;
+    } else if (source === 'user' || source === 'claude') {
+      // COMMAND ECHO FIX: For user/claude commands, preserve command echoes
+      return this.prepareOutputForBrowserPreservingCommands(output);
     } else {
-      // All commands get standard browser preparation
+      // All other sources get standard browser preparation
       return this.prepareOutputForBrowser(output);
     }
   }
 
+  /**
+   * Prepare output for browser while preserving command echoes
+   * Used for user/claude commands where we want to show the command that was executed
+   */
+  private prepareOutputForBrowserPreservingCommands(output: string): string {
+    // Apply same ANSI cleaning as prepareOutputForBrowser but WITHOUT command echo removal
+    let cleaned = output
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x07/g, '') // Bell
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\[\?2004[lh]/g, '') // Bracket paste mode
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\[\d+[ABCD]/g, '') // Cursor movement (up, down, forward, back)
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\[K/g, '') // Clear line (erase to end of line)
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\[\d+;\d+H/g, '') // Cursor positioning (row;col)
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\[\d+;\d+f/g, '') // Alternative cursor positioning
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\[2J/g, '') // Clear entire screen
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\[H/g, '') // Move cursor to home position
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\[\d*J/g, '') // Clear screen variations
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\[\d*K/g, '') // Clear line variations
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\[\?1049[lh]/g, '') // Alternate screen buffer
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\[\?47[lh]/g, '') // Alternate screen buffer (older)
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\[\?1[lh]/g, '') // Application cursor keys
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\[>\d*[lh]/g, '') // Private mode settings
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\[\?\d+[lh]/g, '') // Generic private mode sequences
+      // CRITICAL FIX: Remove OSC (Operating System Command) sequences that cause double carriage returns
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\][^]*?\x07/g, '') // OSC sequences ending with BEL (bell)
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\][^\x1b]*?\x1b\\/g, '') // OSC sequences ending with ESC backslash
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\][0-9;]*[^\x07\x1b]*?\x07?/g, '') // Window title sequences like ESC]0;title
+      // Remove any remaining isolated carriage returns that aren't part of CRLF pairs
+      .replace(/\r(?!\n)/g, ''); // Remove CR that aren't followed by LF to prevent double CR issues
+
+    // ENHANCED CONFIGURATION COMMAND FILTERING: Remove PS1 export commands and their echoes
+    cleaned = cleaned
+      .replace(/export PS1='[^']*'[^\\r\\n]*\r?\n?/g, '') // Remove PS1 export commands
+      .replace(/PS1='[^']*'\r?\n?/g, '') // Remove any remaining PS1 assignment traces
+      .replace(/^null\s*2>&1\r?\n?/, '') // CRITICAL: Remove 'null 2>&1' at start of output
+      .replace(/null 2>&1\r\n/g, '') // Remove exact 'null 2>&1\r\n' pattern from WebSocket data
+      .replace(/null\s*2>&1\r?\n?/g, '') // Remove 'null 2>&1' stray output
+      .replace(/^null\s*2>&1.*$/gm, '') // Remove lines that are just 'null 2>&1'
+      .replace(/null\s*2>&1[^\r\n]*[\r\n]*/g, ''); // Remove any null 2>&1 variations
+
+    // CRITICAL FIX: Remove concatenated duplicate prompts but PRESERVE command echoes
+    // Pattern: [jsbattig@localhost ~]$ [jsbattig@localhost ~]$ whoami → [jsbattig@localhost ~]$ whoami
+    cleaned = cleaned.replace(/(\[[^\]]+\]\$)\s+(\[[^\]]+\]\$)\s+/g, '$2 ');
+
+    // ⚠️  CRITICAL: Line ending normalization - DO NOT REMOVE! ⚠️
+    // This CRLF conversion is essential for xterm.js browser terminal compatibility
+    cleaned = cleaned.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
+
+    return cleaned;
+  }
+
   private prepareOutputForBrowser(output: string): string {
-    
+
+    // ⚠️  CRITICAL WARNING: DO NOT REMOVE OR MODIFY THIS METHOD! ⚠️
+    // This method is essential for proper terminal formatting in browsers.
+    // Removing this will completely break terminal display formatting.
+    // ANSI sequence cleaning and line ending normalization are REQUIRED.
+
     // CRITICAL FIX: Enhanced terminal control sequence cleaning to prevent display corruption
     // Remove all problematic terminal control sequences that can interfere with browser terminal
     let cleaned = output
@@ -1346,9 +1389,11 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     // Pattern: [jsbattig@localhost ~]$ [jsbattig@localhost ~]$ whoami → [jsbattig@localhost ~]$ whoami
     cleaned = cleaned.replace(/(\[[^\]]+\]\$)\s+(\[[^\]]+\]\$)\s+/g, '$2 ');
     
-    // Normalize line endings ONCE - critical for xterm.js compatibility
+    // ⚠️  CRITICAL: Line ending normalization - DO NOT REMOVE! ⚠️
+    // This CRLF conversion is essential for xterm.js browser terminal compatibility
+    // Breaking this will cause weird spacing and alignment issues in terminal display
     cleaned = cleaned.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
-    
+
     return cleaned;
   }
 
@@ -1612,7 +1657,6 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     this.broadcastToLiveListeners(
       sessionName,
       `Signal ${signal} sent\r\n`,
-      "stdout",
       "system"
     );
 
@@ -1657,7 +1701,6 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     this.broadcastToLiveListeners(
       sessionName,
       `Terminal resized to ${cols}x${rows}\r\n`,
-      "stdout",
       "system"
     );
   }
@@ -1755,7 +1798,6 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     this.broadcastToLiveListeners(
       sessionName,
       `Nuclear fallback triggered - all commands cancelled\r\n`,
-      "stdout",
       "system"
     );
 
