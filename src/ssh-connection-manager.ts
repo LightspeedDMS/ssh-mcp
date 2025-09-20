@@ -68,8 +68,11 @@ export interface ISSHConnectionManager {
 
 export interface TerminalOutputEntry {
   timestamp: number;
-  output: string;
+  type: 'command' | 'result';
+  content: string; // Raw command OR result (no prompts)
   source?: import("./types.js").CommandSource;
+  // Backward compatibility - will be removed after migration
+  output?: string;
 }
 
 interface TerminalOutputListener {
@@ -185,8 +188,11 @@ export class SSHConnectionManager implements ISSHConnectionManager {
 
     const outputEntry: TerminalOutputEntry = {
       timestamp: Date.now(),
-      output: processedData,
+      type: 'result', // Default to result for live data
+      content: data,
       source,
+      // Backward compatibility
+      output: processedData,
     };
 
     // Only notify live listeners - don't store in history
@@ -212,8 +218,11 @@ export class SSHConnectionManager implements ISSHConnectionManager {
 
     const outputEntry: TerminalOutputEntry = {
       timestamp: Date.now(),
-      output: data, // No processing for synthetic prompts
+      type: 'result', // Default to result for raw data
+      content: data,
       source,
+      // Backward compatibility
+      output: data, // No processing for synthetic prompts
     };
 
     // Only notify live listeners - don't store in history
@@ -227,21 +236,22 @@ export class SSHConnectionManager implements ISSHConnectionManager {
   }
 
   // Store complete terminal interaction in history for new connections
-  private storeInHistory(
+  // Store command in history with new structure
+  private storeCommandInHistory(
     sessionName: string,
-    data: string,
+    command: string,
     source?: import("./types.js").CommandSource,
   ): void {
     const sessionData = this.connections.get(sessionName);
     if (!sessionData) return;
 
-    // Apply source-aware output processing
-    const processedData = this.prepareOutputForBrowserWithSource(data, source, false);
-
     const outputEntry: TerminalOutputEntry = {
       timestamp: Date.now(),
-      output: processedData,
+      type: 'command',
+      content: command, // Raw command without prompt
       source,
+      // Backward compatibility
+      output: this.prepareOutputForBrowserWithSource(command, source, false),
     };
 
     // Only store in history buffer (keep last MAX_OUTPUT_BUFFER_SIZE entries)
@@ -250,6 +260,33 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       sessionData.outputBuffer.shift();
     }
   }
+
+  // Store result in history with new structure
+  private storeResultInHistory(
+    sessionName: string,
+    result: string,
+    source?: import("./types.js").CommandSource,
+  ): void {
+    const sessionData = this.connections.get(sessionName);
+    if (!sessionData) return;
+
+    const outputEntry: TerminalOutputEntry = {
+      timestamp: Date.now(),
+      type: 'result',
+      content: result, // Raw result without prompt
+      source,
+      // Backward compatibility
+      output: this.prepareOutputForBrowserWithSource(result, source, false),
+    };
+
+    // Only store in history buffer (keep last MAX_OUTPUT_BUFFER_SIZE entries)
+    sessionData.outputBuffer.push(outputEntry);
+    if (sessionData.outputBuffer.length > SSHConnectionManager.MAX_OUTPUT_BUFFER_SIZE) {
+      sessionData.outputBuffer.shift();
+    }
+  }
+
+  // REMOVED: Legacy storeInHistory method - replaced with storeCommandInHistory and storeResultInHistory
 
   // Store complete terminal interaction in history without processing (for synthetic prompts)
   // TEMPORARILY DISABLED: Remove after transition to new architecture
@@ -565,13 +602,13 @@ export class SSHConnectionManager implements ISSHConnectionManager {
         if (source === 'user') {
           // Rule 2a/2b/2c: Real-time WebSocket commands (browser) with prompt injection
           // Rule 2a: Store command cleanly
-          this.storeInHistory(sessionData.connection.name, `${commandEntry.command}`, source);
+          this.storeCommandInHistory(sessionData.connection.name, commandEntry.command, source);
 
           // Rule 2b: Send result + CRLF if there's output
           if (fullOutput.trim()) {
             const normalizedOutput = fullOutput.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
             this.broadcastToLiveListenersRaw(sessionData.connection.name, normalizedOutput + '\r\n', source);
-            this.storeInHistory(sessionData.connection.name, normalizedOutput, source);
+            this.storeResultInHistory(sessionData.connection.name, normalizedOutput, source);
           }
 
           // Rule 2c: Send ready prompt
@@ -579,21 +616,22 @@ export class SSHConnectionManager implements ISSHConnectionManager {
           this.broadcastToLiveListenersRaw(sessionData.connection.name, `${prompt} `, 'system');
         } else {
           // Rule 3b/3c/3d: Real-time MCP commands with prompt injection
-          // Rule 3b: Send command + CRLF (no prompt, already waiting)
-          const normalizedCommand = `${commandEntry.command}\r\n`;
-          this.broadcastToLiveListenersRaw(sessionData.connection.name, normalizedCommand, source);
-          this.storeInHistory(sessionData.connection.name, commandEntry.command, source);
+          // Rule 3b: Send prompt + command + CRLF (WITH PROMPT for proper command echo)
+          const prompt = this.formatPrompt(sessionData);
+          const commandWithPrompt = `${prompt} ${commandEntry.command}\r\n`;
+          this.broadcastToLiveListenersRaw(sessionData.connection.name, commandWithPrompt, source);
+          this.storeCommandInHistory(sessionData.connection.name, commandEntry.command, source);
 
           // Rule 3c: Send result + CRLF if there's output
           if (fullOutput.trim()) {
             const normalizedOutput = fullOutput.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
             this.broadcastToLiveListenersRaw(sessionData.connection.name, normalizedOutput + '\r\n', source);
-            this.storeInHistory(sessionData.connection.name, normalizedOutput, source);
+            this.storeResultInHistory(sessionData.connection.name, normalizedOutput, source);
           }
 
           // Rule 3d: Send ready prompt
-          const prompt = this.formatPrompt(sessionData);
-          this.broadcastToLiveListenersRaw(sessionData.connection.name, `${prompt} `, 'system');
+          const newPrompt = this.formatPrompt(sessionData);
+          this.broadcastToLiveListenersRaw(sessionData.connection.name, `${newPrompt} `, 'system');
         }
 
         // Record in command history

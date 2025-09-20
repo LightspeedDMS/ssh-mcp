@@ -108,10 +108,12 @@ describe("Critical Double Command Echo Fix", () => {
     // Set up output listener to capture what gets broadcasted
     sshManager.addTerminalOutputListener(testSessionName, (entry: TerminalOutputEntry) => {
       terminalOutputs.push(entry);
+      // Support both new and old structure
+      const outputData = entry.content || entry.output || '';
       console.log(`📤 Captured terminal output:`, {
-        output: JSON.stringify(entry.output),
+        output: JSON.stringify(outputData),
         source: entry.source,
-        length: entry.output.length
+        length: outputData.length
       });
     });
 
@@ -162,7 +164,7 @@ describe("Critical Double Command Echo Fix", () => {
     expect(mainOutput).toBeDefined();
     
     // 2. Verify the raw output contains all elements naturally
-    const outputContent = mainOutput.output;
+    const outputContent = mainOutput.content || mainOutput.output || '';
     console.log(`=== RAW OUTPUT CONTENT: ${JSON.stringify(outputContent)} ===`);
     
     // Should contain the command naturally echoed by SSH
@@ -182,10 +184,11 @@ describe("Critical Double Command Echo Fix", () => {
     
     // 4. Verify NO double command echoing by checking there's only one complete sequence
     // With the fix, there should be no separate command echo entries
-    const separateCommandEchos = terminalOutputs.filter(entry => 
-      entry.output.includes(`[testuser@localhost ~]$ ${testCommand}`) && 
-      !entry.output.includes('hello') // Separate command echo without output
-    );
+    const separateCommandEchos = terminalOutputs.filter(entry => {
+      const data = entry.content || entry.output || '';
+      return data.includes(`[testuser@localhost ~]$ ${testCommand}`) &&
+             !data.includes('hello'); // Separate command echo without output
+    });
     
     console.log(`=== SEPARATE COMMAND ECHOES: ${separateCommandEchos.length} ===`);
     expect(separateCommandEchos.length).toBe(0); // Should be 0 with the fix

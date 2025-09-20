@@ -48,11 +48,29 @@ async function runHeadlessTerminalTest(testUrl) {
             return false;
         }
         
-        // Get initial terminal content (history replay)
+        // Get initial terminal content (history replay) - FIXED: Preserve line structure
         console.log('📜 Checking terminal history replay...');
         const initialContent = await page.evaluate(() => {
             const terminalElement = document.querySelector('.xterm-screen');
-            return terminalElement ? terminalElement.textContent : '';
+            if (!terminalElement) return '';
+
+            // CRITICAL FIX: Get terminal content with line structure preserved
+            const rows = terminalElement.querySelectorAll('.xterm-rows > *');
+            if (rows.length === 0) {
+                // Fallback: if no rows structure, try to get inner text which preserves some formatting
+                return terminalElement.innerText || terminalElement.textContent || '';
+            }
+
+            // Build line-by-line content with explicit line breaks
+            const lines = [];
+            rows.forEach(row => {
+                const lineContent = row.innerText || row.textContent || '';
+                if (lineContent.trim()) { // Only add non-empty lines
+                    lines.push(lineContent);
+                }
+            });
+
+            return lines.join('\n'); // Join with explicit newlines
         });
         
         console.log('📜 Initial terminal content:');
@@ -61,17 +79,24 @@ async function runHeadlessTerminalTest(testUrl) {
         console.log('---END TERMINAL CONTENT---');
         
         // Basic validation - look for any actual terminal content vs just CSS
-        const hasActualContent = initialContent.length > 0 && 
+        const hasActualContent = initialContent.length > 0 &&
                                !initialContent.startsWith('WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW') && // Not just CSS
                                (initialContent.includes('$') || initialContent.includes('localhost') || initialContent.includes('/home'));
+
+        // CRITICAL: Check for proper line separation (no concatenation)
+        const lines = initialContent.split('\n');
+        const hasProperLineSeparation = lines.length > 1;
+        const hasNoConcatenation = !initialContent.includes('pwd/home/jsbattig') && !initialContent.includes('whoamijsbattig');
         
         console.log(`📊 Content Analysis:
    - Content length: ${initialContent.length} chars
    - Has actual terminal content: ${hasActualContent ? '✓' : '✗'}
-   - Contains prompt indicators: ${(initialContent.includes('$') || initialContent.includes('@')) ? '✓' : '✗'}`);
-        
-        // Test typing functionality if content looks valid
-        if (hasActualContent) {
+   - Contains prompt indicators: ${(initialContent.includes('$') || initialContent.includes('@')) ? '✓' : '✗'}
+   - Has proper line separation: ${hasProperLineSeparation ? '✓' : '✗'} (${lines.length} lines)
+   - No concatenation detected: ${hasNoConcatenation ? '✓' : '✗'}`);
+
+        // Test typing functionality if content looks valid AND properly formatted
+        if (hasActualContent && hasProperLineSeparation && hasNoConcatenation) {
             console.log('⌨️  Testing typing functionality...');
             const terminalInput = await page.waitForSelector('.xterm textarea', { timeout: 5000 });
             
@@ -94,9 +119,15 @@ async function runHeadlessTerminalTest(testUrl) {
             const showsTypedCommand = contentAfterTyping.includes(testCommand);
             console.log(`⌨️  Typing verification: ${showsTypedCommand ? '✓' : '✗'} Command appears while typing`);
             
-            return hasActualContent && showsTypedCommand;
+            return hasActualContent && hasProperLineSeparation && hasNoConcatenation && showsTypedCommand;
         } else {
-            console.log('⚠️  Terminal content appears to be CSS or invalid - skipping interaction test');
+            if (!hasActualContent) {
+                console.log('⚠️  Terminal content appears to be CSS or invalid - skipping interaction test');
+            } else if (!hasProperLineSeparation) {
+                console.log('❌ CONCATENATION BUG: Terminal content lacks proper line separation');
+            } else if (!hasNoConcatenation) {
+                console.log('❌ CONCATENATION BUG: Commands and results are concatenated on same line');
+            }
             return false;
         }
         

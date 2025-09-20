@@ -369,30 +369,33 @@ export class WebServerManager {
     this.addClientToSession(sessionName, ws);
 
     // Auto-subscribe to session terminal output
-    if (this.sshManager.hasSession(sessionName)) {
+    console.log(`🔧 [CONCATENATION DEBUG] Checking if session exists: ${sessionName}`);
+    const sessionExists = this.sshManager.hasSession(sessionName);
+    console.log(`🔧 [CONCATENATION DEBUG] Session ${sessionName} exists: ${sessionExists}`);
+
+    if (sessionExists) {
       const outputCallback = (entry: TerminalOutputEntry): void => {
         if (ws.readyState === ws.OPEN) {
-          // ARCHITECTURAL FIX: Apply WebSocket command echo suppression
-          let filteredOutput = entry.output;
-          
-          // CRITICAL FIX: Do NOT apply echo suppression to 'user' source commands
-          // The SSH manager's broadcastCommandWithPrompt already formats these correctly
-          // with the proper command echo: [user@host dir]$ command\r\nresult
-          // Applying echo suppression here removes the command entirely, causing display issues
+          // Use the new structure with backward compatibility
+          const outputData = entry.content || entry.output || '';
 
-          // For WebSocket-initiated commands, the SSH manager handles echo formatting
-          // No additional processing needed here - use the output as-is
-          // For MCP commands (source: 'claude') and system output, pass through unchanged
-          
+          // LIVE LISTENER FORMATTING FIX: Forward all entries from live listeners
+          // The SSH manager's broadcastToLiveListenersRaw already handles command/result formatting
+          // Just ensure CRLF formatting for xterm.js compatibility
+          const formattedData = outputData.endsWith('\r\n') ? outputData : `${outputData}\r\n`;
+
+          // Forward all live terminal entries to WebSocket clients with proper formatting
+          // This ensures real-time display matches history replay formatting (Rules 1a/1b)
           ws.send(
             JSON.stringify({
               type: "terminal_output",
               sessionName,
               timestamp: new Date(entry.timestamp).toISOString(),
-              data: filteredOutput,
-              source: entry.source, // CRITICAL: Include source to prevent undefined source
+              data: formattedData,
+              source: entry.source,
             }),
           );
+          // Commands are skipped - they're sent by SSH manager's broadcastToLiveListenersRaw with prompts
         }
       };
 
@@ -400,7 +403,9 @@ export class WebServerManager {
         this.sshManager.addTerminalOutputListener(sessionName, outputCallback);
 
         // Send historical terminal session with proper format: prompt + command + output + prompt
+        console.log(`🔧 [CONCATENATION DEBUG] About to send terminal history for ${sessionName}`);
         this.sendFormattedTerminalHistory(ws, sessionName);
+        console.log(`🔧 [CONCATENATION DEBUG] Finished sending terminal history for ${sessionName}`);
 
         ws.on("close", () => {
           this.sshManager.removeTerminalOutputListener(
@@ -453,6 +458,16 @@ export class WebServerManager {
       } catch (error) {
         // Handle listener setup errors gracefully - log but don't crash
         log.error('Error setting up terminal output listener', error instanceof Error ? error : new Error(String(error)));
+      }
+    } else {
+      console.log(`🔧 [CONCATENATION DEBUG] Session ${sessionName} does not exist - skipping history replay`);
+      // Send session not found message to browser
+      if (ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({
+          type: "error",
+          message: `Session ${sessionName} not found`,
+          timestamp: new Date().toISOString()
+        }));
       }
     }
   }
@@ -1017,33 +1032,97 @@ export class WebServerManager {
       // Rule 1a/1b: History replay with prompt injection
       const { username, host } = connectionInfo;
 
+      // Helper function to format prompts consistently with ssh-connection-manager
+      const formatPrompt = (username: string, host: string, currentDir = '~'): string => {
+        return `[${username}@${host} ${currentDir}]$`;
+      };
+
       // Rule 1a: Iterate through history entries and inject prompts
-      terminalHistory.forEach((entry) => {
-        if (ws.readyState === ws.OPEN) {
-          // For now, maintain compatibility by sending entries as-is
-          // TODO: Implement proper command/result separation with prompt injection
+      log.debug(`[CONCATENATION DEBUG] Sending ${terminalHistory.length} terminal history entries for ${sessionName}`);
+      terminalHistory.forEach((entry, index) => {
+        log.debug(`[CONCATENATION DEBUG] Entry ${index}: type=${entry.type}, content="${entry.content?.substring(0, 50)}..."`);
+      });
+
+      for (const entry of terminalHistory) {
+        if (ws.readyState !== ws.OPEN) break;
+
+        // Helper function to check if content already has a prompt
+        const hasPrompt = (content: string): boolean => {
+          const promptPattern = `[${username}@${host}`;
+          return content.includes(promptPattern);
+        };
+
+        // Handle new structure with type field
+        if (entry.type === 'command') {
+          // CRITICAL FIX: Always inject prompt for commands in history replay
+          // Raw commands should always get prompts when replayed to browser
+          const prompt = formatPrompt(username, host);
+          const output = `${prompt} ${entry.content}\r\n`;
+
+          log.debug(`[CONCATENATION FIX] Sending command with prompt: "${output.trim()}"`);
+
           ws.send(
             JSON.stringify({
               type: "terminal_output",
               sessionName,
               timestamp: new Date(entry.timestamp).toISOString(),
-              data: entry.output,
+              data: output,
               source: entry.source,
             }),
           );
+        } else if (entry.type === 'result') {
+          // Send result without prompt (no extra line break)
+          const output = entry.content.endsWith('\r\n') ? entry.content : `${entry.content}\r\n`;
+          ws.send(
+            JSON.stringify({
+              type: "terminal_output",
+              sessionName,
+              timestamp: new Date(entry.timestamp).toISOString(),
+              data: output,
+              source: entry.source,
+            }),
+          );
+        } else {
+          // Backward compatibility: handle old format without type field
+          // Check if it looks like a command or result based on content
+          const content = entry.output || entry.content || '';
+          if (hasPrompt(content)) {
+            // Looks like a command with prompt - send as-is
+            const output = content.endsWith('\r\n') ? content : `${content}\r\n`;
+            ws.send(
+              JSON.stringify({
+                type: "terminal_output",
+                sessionName,
+                timestamp: new Date(entry.timestamp).toISOString(),
+                data: output,
+                source: entry.source,
+              }),
+            );
+          } else {
+            // Looks like a result - send without adding prompt
+            const output = content.endsWith('\r\n') ? content : `${content}\r\n`;
+            ws.send(
+              JSON.stringify({
+                type: "terminal_output",
+                sessionName,
+                timestamp: new Date(entry.timestamp).toISOString(),
+                data: output,
+                source: entry.source,
+              }),
+            );
+          }
         }
-      });
+      }
 
-      // Rule 1b: End with ready prompt if history exists
+      // Rule 1b: End with ready prompt if history exists - ENSURE CRLF
       if (terminalHistory.length > 0) {
-        const currentDirectory = '~'; // TODO: Get actual current directory
-        const prompt = `[${username}@${host} ${currentDirectory}]$ `;
+        const prompt = `${formatPrompt(username, host)} `;
         ws.send(
           JSON.stringify({
             type: "terminal_output",
             sessionName,
             timestamp: new Date().toISOString(),
-            data: prompt,
+            data: prompt, // Note: No trailing \r\n for final prompt - cursor should remain on same line
             source: 'system',
           }),
         );

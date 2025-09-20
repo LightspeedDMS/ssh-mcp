@@ -224,7 +224,7 @@ describe('Initial Prompt Display Tests', () => {
     
     // Add listener to capture prompt broadcasts
     manager.addTerminalOutputListener(mockSessionName, (entry) => {
-      promptHistory.push(entry.output);
+      promptHistory.push(entry.content || entry.output || '');
     });
     
     // The SSH connection manager should broadcast initial prompt

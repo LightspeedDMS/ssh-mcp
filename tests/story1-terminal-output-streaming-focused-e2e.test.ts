@@ -226,9 +226,10 @@ describe("Story 1: Terminal Output Streaming - Focused E2E", () => {
     expect(history2Text).not.toContain("Session 1 message");
 
     // Verify formatting detection - using output content as proxy for formatting
-    const formattedEntries1 = history1.filter(
-      (entry) => entry.output.includes('\x1b[') || entry.output.includes('\r\n'),
-    );
+    const formattedEntries1 = history1.filter((entry) => {
+      const data = entry.content || entry.output || '';
+      return data.includes('\x1b[') || data.includes('\r\n');
+    });
     expect(formattedEntries1.length).toBeGreaterThan(0);
 
     // Cleanup
