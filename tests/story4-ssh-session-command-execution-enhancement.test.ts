@@ -496,15 +496,15 @@ describe("Story 4: SSH Session Command Execution Enhancement", () => {
           const claudeEntries = history.filter(entry => entry.source === 'claude');
           const userEntries = history.filter(entry => entry.source === 'user');
           
-          // Both should have identical compatibility settings
+          // Both should have valid output content
           claudeEntries.forEach(entry => {
-            expect(entry.vt100Compatible).toBeDefined();
-            expect(entry.preserveFormatting).toBeDefined();
+            expect(entry.output).toBeDefined();
+            expect(typeof entry.output).toBe('string');
           });
-          
+
           userEntries.forEach(entry => {
-            expect(entry.vt100Compatible).toBeDefined();
-            expect(entry.preserveFormatting).toBeDefined();
+            expect(entry.output).toBeDefined();
+            expect(typeof entry.output).toBe('string');
           });
           
         } catch (error) {

@@ -328,7 +328,7 @@ describe('SessionData Buffer Integration - TDD Validation', () => {
         isShellReady: true,
         initialPromptShown: true,
         outputBuffer: [
-          { timestamp: Date.now(), output: 'test output',  output: 'test output',   }
+          { timestamp: Date.now(), output: 'test output' }
         ],
         outputListeners: [],
         commandHistory: [

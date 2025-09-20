@@ -1014,28 +1014,41 @@ export class WebServerManager {
         return;
       }
 
-      // TERMINAL SESSION FORMATTING: Send terminal history without additional processing
+      // Rule 1a/1b: History replay with prompt injection
       const { username, host } = connectionInfo;
 
-      // Send stored terminal output entries in chronological order (NO additional prompts)
+      // Rule 1a: Iterate through history entries and inject prompts
       terminalHistory.forEach((entry) => {
         if (ws.readyState === ws.OPEN) {
-          // CRITICAL FIX: Do NOT modify the output data here
-          // The SSH manager already formatted it correctly with broadcastCommandWithPrompt
+          // For now, maintain compatibility by sending entries as-is
+          // TODO: Implement proper command/result separation with prompt injection
           ws.send(
             JSON.stringify({
               type: "terminal_output",
               sessionName,
               timestamp: new Date(entry.timestamp).toISOString(),
-              data: entry.output, // Use output as-is from SSH manager
+              data: entry.output,
               source: entry.source,
             }),
           );
         }
       });
 
-      // CRITICAL FIX: Only send initial prompt if there's NO history at all
-      if (terminalHistory.length === 0) {
+      // Rule 1b: End with ready prompt if history exists
+      if (terminalHistory.length > 0) {
+        const currentDirectory = '~'; // TODO: Get actual current directory
+        const prompt = `[${username}@${host} ${currentDirectory}]$ `;
+        ws.send(
+          JSON.stringify({
+            type: "terminal_output",
+            sessionName,
+            timestamp: new Date().toISOString(),
+            data: prompt,
+            source: 'system',
+          }),
+        );
+      } else {
+        // Send initial prompt if no history
         this.sendInitialPrompt(ws, sessionName, username + '@' + host, '~');
       }
 
