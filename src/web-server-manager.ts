@@ -381,8 +381,17 @@ export class WebServerManager {
 
           // LIVE LISTENER FORMATTING FIX: Forward all entries from live listeners
           // The SSH manager's broadcastToLiveListenersRaw already handles command/result formatting
-          // Just ensure CRLF formatting for xterm.js compatibility
-          const formattedData = outputData.endsWith('\r\n') ? outputData : `${outputData}\r\n`;
+          // CRLF BUG FIX: Don't add CRLF to final prompts that should remain on same line
+
+          // Check if this is a final prompt (ends with ]$ followed by optional space)
+          const isFinalPrompt = entry.source === 'system' && /\[[^\]]+\]\$\s*$/.test(outputData);
+
+          // Only add CRLF if:
+          // 1. Data doesn't already end with CRLF, AND
+          // 2. It's not a final prompt that should remain on the same line
+          const formattedData = outputData.endsWith('\r\n') || isFinalPrompt
+            ? outputData
+            : `${outputData}\r\n`;
 
           // Forward all live terminal entries to WebSocket clients with proper formatting
           // This ensures real-time display matches history replay formatting (Rules 1a/1b)

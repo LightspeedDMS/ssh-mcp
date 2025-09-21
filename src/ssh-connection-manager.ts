@@ -607,7 +607,9 @@ export class SSHConnectionManager implements ISSHConnectionManager {
           // Rule 2b: Send result + CRLF if there's output
           if (fullOutput.trim()) {
             const normalizedOutput = fullOutput.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
-            this.broadcastToLiveListenersRaw(sessionData.connection.name, normalizedOutput + '\r\n', source);
+            // CRLF BUG FIX: Don't add extra CRLF if output already ends with CRLF
+            const outputWithCRLF = normalizedOutput.endsWith('\r\n') ? normalizedOutput : normalizedOutput + '\r\n';
+            this.broadcastToLiveListenersRaw(sessionData.connection.name, outputWithCRLF, source);
             this.storeResultInHistory(sessionData.connection.name, normalizedOutput, source);
           }
 
@@ -625,7 +627,9 @@ export class SSHConnectionManager implements ISSHConnectionManager {
           // Rule 3c: Send result + CRLF if there's output
           if (fullOutput.trim()) {
             const normalizedOutput = fullOutput.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
-            this.broadcastToLiveListenersRaw(sessionData.connection.name, normalizedOutput + '\r\n', source);
+            // CRLF BUG FIX: Don't add extra CRLF if output already ends with CRLF
+            const outputWithCRLF = normalizedOutput.endsWith('\r\n') ? normalizedOutput : normalizedOutput + '\r\n';
+            this.broadcastToLiveListenersRaw(sessionData.connection.name, outputWithCRLF, source);
             this.storeResultInHistory(sessionData.connection.name, normalizedOutput, source);
           }
 
