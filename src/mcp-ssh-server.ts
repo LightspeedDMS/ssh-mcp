@@ -9,6 +9,7 @@ import {
 import { SSHConnectionManager } from "./ssh-connection-manager.js";
 import { TerminalSessionStateManager, SessionBusyError } from "./terminal-session-state-manager.js";
 import { Logger, log } from "./logger.js";
+import { WebServerManager } from "./web-server-manager.js";
 
 export interface MCPSSHServerConfig {
   sshTimeout?: number;
@@ -59,6 +60,7 @@ export class MCPSSHServer {
   private mcpServer: Server;
   private sshManager: SSHConnectionManager;
   private terminalStateManager: TerminalSessionStateManager;
+  private webServerManager?: WebServerManager;
   private config: MCPSSHServerConfig;
   private mcpRunning = false;
   private webServerPort?: number;
@@ -67,6 +69,7 @@ export class MCPSSHServer {
     config: MCPSSHServerConfig = {},
     sshManager?: SSHConnectionManager,
     terminalStateManager?: TerminalSessionStateManager,
+    webServerManager?: WebServerManager,
   ) {
     this.validateConfig(config);
 
@@ -96,9 +99,12 @@ export class MCPSSHServer {
 
     // SSH manager - use shared instance or create new one
     this.sshManager = sshManager || new SSHConnectionManager(8080);
-    
+
     // Terminal state manager - use shared instance or create new one
     this.terminalStateManager = terminalStateManager || new TerminalSessionStateManager();
+
+    // Web server manager - optional for browser connection detection
+    this.webServerManager = webServerManager;
 
     this.setupMCPToolHandlers();
   }
@@ -483,10 +489,58 @@ export class MCPSSHServer {
         ],
       };
     }
-    
+
+    // BROWSER BLOCKING FIX: Check for active browser connections
+    // If browser is connected, return immediately with queued status instead of blocking
+    if (this.webServerManager && this.webServerManager.hasActiveBrowserConnections(sessionName)) {
+      // Generate unique command ID for polling
+      const mcpCommandId = `mcp-cmd-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+      // Add command to browser buffer for execution
+      this.sshManager.addBrowserCommand(sessionName, command, mcpCommandId, 'claude');
+
+      // Execute command asynchronously (without waiting)
+      this.sshManager.executeCommand(sessionName, command, {
+        timeout,
+        source: 'claude',
+        asyncTimeout,
+      }).then(result => {
+        // Update browser command buffer with result when complete
+        this.sshManager.updateBrowserCommandResult(sessionName, mcpCommandId, result);
+      }).catch(error => {
+        // Update browser command buffer with error when failed
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        this.sshManager.updateBrowserCommandResult(sessionName, mcpCommandId, {
+          stdout: '',
+          stderr: errorMessage,
+          exitCode: 1
+        });
+      });
+
+      // Return immediately with queued status
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                success: true,
+                queued: true,
+                commandId: mcpCommandId,
+                message: `Command queued for browser execution. Use ssh_poll_task with taskId "${mcpCommandId}" to check status.`,
+                pollingInstructions: 'Use ssh_poll_task with taskId to check command status',
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    }
+
     // Generate unique command ID
     const mcpCommandId = `mcp-cmd-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
+
     // CRITICAL FIX: Proper resource management pattern
     try {
       // STATE MACHINE: Start command execution
@@ -504,6 +558,10 @@ export class MCPSSHServer {
 
         // Update browser command buffer with execution result
         this.sshManager.updateBrowserCommandResult(sessionName, mcpCommandId, result);
+
+        // CRITICAL FIX: Clean up session state after successful execution
+        // This was the MISSING cleanup call causing the SESSION_BUSY resource leak
+        this.terminalStateManager.completeCommandExecution(sessionName, mcpCommandId);
 
         return {
           content: [
@@ -763,6 +821,12 @@ export class MCPSSHServer {
       this.sshManager.addBrowserCommand(sessionName, cmd.command, cmd.commandId, cmd.source);
     });
 
+    // Clean up terminal state after cancellation
+    const currentCommand = this.terminalStateManager.getCurrentCommand(sessionName);
+    if (currentCommand && currentCommand.initiator === 'mcp') {
+      this.terminalStateManager.completeCommandExecution(sessionName, currentCommand.commandId);
+    }
+
     return {
       content: [
         {
@@ -805,21 +869,51 @@ export class MCPSSHServer {
     }
 
     try {
-      const task = await this.sshManager.getBackgroundTaskStatus(sessionName, taskId);
+      // First try to find task in background tasks
+      let task;
+      let response;
 
-      const response = {
+      try {
+        task = await this.sshManager.getBackgroundTaskStatus(sessionName, taskId);
+        response = {
+          success: true,
+          taskId: task.taskId,
+          state: task.state,
+          result: task.result,
+        };
+      } catch (backgroundTaskError) {
+        // If not found in background tasks, check browser command buffer
+        const browserCommands = this.sshManager.getBrowserCommandBuffer(sessionName);
+        const browserCommand = browserCommands.find(cmd => cmd.commandId === taskId);
+
+        if (browserCommand) {
+          // Convert browser command to task format
+          const isCompleted = browserCommand.result && browserCommand.result.exitCode !== -1;
+          response = {
+            success: true,
+            taskId: taskId,
+            state: isCompleted ? 'completed' : 'running',
+            result: browserCommand.result || null,
+          };
+        } else {
+          // Task not found in either location
+          throw new Error(`Task '${taskId}' not found in session '${sessionName}'`);
+        }
+      }
+
+      const finalResponse = {
         success: true,
-        taskId: task.taskId,
-        state: task.state,
-        result: task.result,
-        error: task.error,
-        message: `Task is ${task.state}`
+        taskId: response.taskId,
+        state: response.state,
+        result: response.result,
+        error: task?.error || null,
+        message: `Task is ${response.state}`
       };
 
       return {
         content: [{
           type: "text",
-          text: JSON.stringify(response, null, 2)
+          text: JSON.stringify(finalResponse, null, 2)
         }]
       };
     } catch (error) {

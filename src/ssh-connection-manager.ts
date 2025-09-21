@@ -106,6 +106,7 @@ interface SessionData {
   connectionInfo: { username: string; host: string }; // For prompt generation
   isAtPrompt: boolean; // Tracks whether terminal is currently at prompt (ready for input)
   backgroundTasks: Map<string, BackgroundTask>; // Background task storage for async execution
+  activeStreams: Set<any>; // Track active SSH streams for proper cancellation
 }
 
 // Terminal output streaming interfaces
@@ -363,6 +364,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
           connectionInfo: { username: config.username, host: config.host },
           isAtPrompt: true, // SSH sessions start at prompt - ready for input
           backgroundTasks: new Map<string, BackgroundTask>(), // Initialize background task storage
+          activeStreams: new Set(), // Initialize active stream tracking for cancellation
         };
 
         this.connections.set(config.name, sessionData);
@@ -613,7 +615,9 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     }
 
     const executionStartTime = Date.now();
-    const timeoutMs = commandEntry.options.timeout || 15000;
+
+    // Browser commands (source: 'user') wait forever, MCP commands have timeout
+    const timeoutMs = commandEntry.options.source === 'user' ? null : (commandEntry.options.timeout || 15000);
 
     // Use exec() for reliable completion detection via close events
     sessionData.client.exec(commandEntry.command, (err, stream) => {
@@ -624,27 +628,37 @@ export class SSHConnectionManager implements ISSHConnectionManager {
         return;
       }
 
+      // CRITICAL FIX: Track active stream for SIGINT cancellation
+      sessionData.activeStreams.add(stream);
+
       let stdout = "";
       let stderr = "";
       let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
-      // Set timeout
-      timeoutHandle = setTimeout(() => {
-        stream.destroy();
-        commandEntry.reject(
-          new Error(
-            `Command '${commandEntry.command}' timed out after ${timeoutMs}ms`,
-          ),
-        );
-        sessionData.isCommandExecuting = false;
-        this.processCommandQueue(sessionData);
-      }, timeoutMs);
+      // Set timeout only for MCP commands, browser commands wait forever
+      if (timeoutMs !== null) {
+        timeoutHandle = setTimeout(() => {
+          // CRITICAL FIX: Remove stream from active tracking on timeout
+          sessionData.activeStreams.delete(stream);
+          stream.destroy();
+          commandEntry.reject(
+            new Error(
+              `Command '${commandEntry.command}' timed out after ${timeoutMs}ms`,
+            ),
+          );
+          sessionData.isCommandExecuting = false;
+          this.processCommandQueue(sessionData);
+        }, timeoutMs);
+      }
 
       // EVENT-BASED COMPLETION DETECTION - The reliable approach
       stream.on('close', async (exitCode: number) => {
         if (timeoutHandle) {
           clearTimeout(timeoutHandle);
         }
+
+        // CRITICAL FIX: Remove stream from active tracking on completion
+        sessionData.activeStreams.delete(stream);
 
         const executionEndTime = Date.now();
         const duration = executionEndTime - executionStartTime;
@@ -768,6 +782,10 @@ export class SSHConnectionManager implements ISSHConnectionManager {
         if (timeoutHandle) {
           clearTimeout(timeoutHandle);
         }
+
+        // CRITICAL FIX: Remove stream from active tracking on error
+        sessionData.activeStreams.delete(stream);
+
         commandEntry.reject(error);
         sessionData.isCommandExecuting = false;
         this.processCommandQueue(sessionData);
@@ -981,6 +999,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     const currentDir = sessionData.currentDirectory || '~';
     return `[${username}@${host} ${currentDir}]$`;
   }
+
 
 
   // TEMPORARILY DISABLED: Remove after transition to new architecture
@@ -1726,6 +1745,19 @@ export class SSHConnectionManager implements ISSHConnectionManager {
 
     // If it's SIGINT, cancel all queued/running operations and clear browser buffer
     if (signal === 'SIGINT') {
+      // CRITICAL FIX: Destroy all active SSH streams to actually cancel running commands
+      if (sessionData.activeStreams.size > 0) {
+        log.debug(`SIGINT signal: destroying ${sessionData.activeStreams.size} active streams for session ${sessionName}`);
+        for (const stream of sessionData.activeStreams) {
+          try {
+            stream.destroy();
+          } catch (error) {
+            log.warn(`Failed to destroy stream during SIGINT: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+        sessionData.activeStreams.clear();
+      }
+
       // Clear browser command buffer (CRITICAL FIX for test failures)
       const browserCommandsCleared = sessionData.browserCommandBuffer.length;
       sessionData.browserCommandBuffer = [];
@@ -1753,6 +1785,15 @@ export class SSHConnectionManager implements ISSHConnectionManager {
           log.debug(`SIGINT signal: cancelled ${cancelledTaskCount} background tasks for session ${sessionName}`);
         }
       }
+
+      // CRITICAL FIX: Clear execution state to allow immediate command execution after SIGINT
+      sessionData.isCommandExecuting = false;
+
+      // Send fresh prompt after SIGINT cancellation using existing prompt injection pattern
+      const prompt = this.formatPrompt(sessionData);
+      this.broadcastToLiveListenersRaw(sessionName, `${prompt} `, 'system');
+      sessionData.isAtPrompt = true; // Terminal is now at prompt, ready for input
+      log.debug(`SIGINT signal: injected fresh prompt for session ${sessionName}`);
     }
   }
 

@@ -775,6 +775,15 @@ export class WebServerManager {
       // AC 5.4: WebSocket SIGINT signal format: {type: 'terminal_signal', sessionName: 'session', signal: 'SIGINT'}
       this.sshManager.sendTerminalSignal(sessionName, signal);
 
+      // If SIGINT, clear terminal state manager to allow new commands
+      if (signal === 'SIGINT') {
+        const currentCommand = this.terminalStateManager.getCurrentCommand(sessionName);
+        if (currentCommand) {
+          this.terminalStateManager.completeCommandExecution(sessionName, currentCommand.commandId);
+          console.debug(`[WebServerManager] SIGINT: Cleared terminal state for session ${sessionName}, command ${currentCommand.commandId}`);
+        }
+      }
+
       // Send confirmation response
       if (ws.readyState === ws.OPEN) {
         ws.send(JSON.stringify({
@@ -880,6 +889,29 @@ export class WebServerManager {
     if (sessionState) {
       sessionState.connectedClients.delete(client);
     }
+  }
+
+  /**
+   * Check if a session has active browser connections
+   * @param sessionName - Name of the session to check
+   * @returns True if there are active WebSocket connections for the session
+   */
+  public hasActiveBrowserConnections(sessionName: string): boolean {
+    const sessionState = this.sessionStates.get(sessionName);
+    if (!sessionState) {
+      return false;
+    }
+
+    // Filter out closed connections and check if any remain
+    const activeConnections = Array.from(sessionState.connectedClients).filter(
+      client => client.readyState === client.OPEN
+    );
+
+    // Clean up any closed connections
+    sessionState.connectedClients.clear();
+    activeConnections.forEach(client => sessionState.connectedClients.add(client));
+
+    return activeConnections.length > 0;
   }
 
   private handleStateRecoveryRequest(ws: import("ws").WebSocket, sessionName: string): void {

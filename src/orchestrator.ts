@@ -24,8 +24,8 @@ export interface OrchestratorConfig {
  * Use this for manual server startup that includes both MCP and web interface
  */
 export class Orchestrator {
-  private mcpServer: MCPSSHServer;
-  private webServer!: WebServerManager;
+  private mcpServer?: MCPSSHServer;
+  private webServer?: WebServerManager;
   private sshManager: SSHConnectionManager;
   private portManager: PortManager;
   private config: OrchestratorConfig;
@@ -53,13 +53,7 @@ export class Orchestrator {
     // Create shared state manager FIRST
     this.sharedStateManager = new TerminalSessionStateManager();
 
-    const mcpConfig: MCPSSHServerConfig = {
-      sshTimeout: this.config.sshTimeout,
-      maxSessions: this.config.maxSessions,
-      logLevel: this.config.logLevel,
-    };
-
-    this.mcpServer = new MCPSSHServer(mcpConfig, this.sshManager, this.sharedStateManager);
+    // Note: MCP server will be created in start() method after web server is ready
   }
 
   private validateConfig(config: OrchestratorConfig): void {
@@ -88,12 +82,20 @@ export class Orchestrator {
       };
       this.webServer = new WebServerManager(this.sshManager, webConfig, this.sharedStateManager);
 
+      // Start web server first to establish HTTP endpoint
+      await this.webServer.start();
+
+      // Now create MCP server with web server reference for browser connection detection
+      const mcpConfig: MCPSSHServerConfig = {
+        sshTimeout: this.config.sshTimeout,
+        maxSessions: this.config.maxSessions,
+        logLevel: this.config.logLevel,
+      };
+      this.mcpServer = new MCPSSHServer(mcpConfig, this.sshManager, this.sharedStateManager, this.webServer);
+
       // Configure servers with web port
       this.mcpServer.setWebServerPort(this.webPort!);
       this.sshManager.updateWebServerPort(this.webPort!);
-
-      // Start both servers - web server first to establish HTTP endpoint
-      await this.webServer.start();
 
       // Start MCP server with stdio transport (non-blocking)
       // Note: MCP server with stdio will block, so we start it last

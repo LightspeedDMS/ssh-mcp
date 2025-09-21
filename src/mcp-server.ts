@@ -3,6 +3,7 @@
 import { MCPSSHServer } from "./mcp-ssh-server.js";
 import { WebServerManager } from "./web-server-manager.js";
 import { SSHConnectionManager } from "./ssh-connection-manager.js";
+import { TerminalSessionStateManager } from "./terminal-session-state-manager.js";
 import { PortManager } from "./port-discovery.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -28,15 +29,16 @@ async function main(): Promise<void> {
     logLevel: process.env.LOG_LEVEL || "info",
   };
 
-  const mcpServer = new MCPSSHServer(mcpConfig, sshManager);
-  mcpServer.setWebServerPort(webPort);
-
   // CRITICAL FIX: Share the SAME state manager instance between components
-  const sharedStateManager = mcpServer.getTerminalStateManager();
+  const sharedStateManager = new TerminalSessionStateManager();
 
   // Configure web server with SAME SSH manager AND SAME state manager
   const webConfig = { port: webPort };
   const webServer = new WebServerManager(sshManager, webConfig, sharedStateManager);
+
+  // BROWSER BLOCKING FIX: Pass webServerManager to MCP server for browser connection detection
+  const mcpServer = new MCPSSHServer(mcpConfig, sshManager, sharedStateManager, webServer);
+  mcpServer.setWebServerPort(webPort);
 
   // Write port file
   const portFilePath = path.join(process.cwd(), ".ssh-mcp-server.port");
