@@ -148,6 +148,6 @@ describe("Queue Limit Unit Test", () => {
 
   it("should validate constants are reasonable", () => {
     expect(QUEUE_CONSTANTS.MAX_QUEUE_SIZE).toBe(100);
-    expect(QUEUE_CONSTANTS.MAX_COMMAND_AGE_MS).toBe(5 * 60 * 1000);
+    // MAX_COMMAND_AGE_MS has been removed as part of timeout system cleanup
   });
 });

@@ -95,3 +95,4 @@ ssh-mcp-persistent.js
 # Yarn Integrity file
 .yarn-integrity
 /.code-indexer
+.code-indexer-override.yaml

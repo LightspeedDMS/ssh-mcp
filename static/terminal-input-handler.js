@@ -57,6 +57,9 @@ class TerminalInputHandler {
             else if (charCode === 27 && data.length > 1) { // Escape sequences (arrow keys, etc.)
                 this.handleEscapeSequence(data);
             }
+            else if (charCode === 3) { // Ctrl-C - Send cancellation signal
+                this.sendCancellationSignal();
+            }
             else if (charCode >= 32 && charCode < 127) { // Printable characters
                 this.handlePrintableCharacter(data);
             }
@@ -77,10 +80,7 @@ class TerminalInputHandler {
         if (this.state.currentLine.length + data.length > this.config.maxLineLength) {
             return false;
         }
-        // Basic XSS prevention - block HTML-like content in terminal input
-        if (data.includes('<') || data.includes('>') || data.includes('&')) {
-            return false;
-        }
+        // Allow normal terminal characters including <, >, & for legitimate use
         // Block null bytes and other dangerous characters
         if (data.includes('\0') || data.includes('\x1b[6n')) { // CSI Device Status Report
             return false;
@@ -118,8 +118,8 @@ class TerminalInputHandler {
                 this.state.currentLine.slice(0, this.state.cursorPosition - 1) +
                     this.state.currentLine.slice(this.state.cursorPosition);
             this.state.cursorPosition--;
-            // ECHO FIX: Removed local backspace echo to prevent double echo with SSH server echo
-            // SSH server handles backspace display, local echo is not needed
+            // LOCAL ECHO: Show backspace for immediate user feedback
+            this.terminal.write('\b \b');
         }
     }
     /**
@@ -152,6 +152,27 @@ class TerminalInputHandler {
                 // ECHO FIX: Removed local cursor movement echo - SSH server handles this
                 break;
             // Ignore other escape sequences to prevent terminal manipulation
+        }
+    }
+    /**
+     * Send cancellation signal (Ctrl-C) via WebSocket
+     */
+    sendCancellationSignal() {
+        try {
+            if (this.webSocket.readyState === WebSocket.OPEN) {
+                const message = {
+                    type: 'terminal_signal',
+                    sessionName: this.sessionName,
+                    signal: 'SIGINT'
+                };
+                this.webSocket.send(JSON.stringify(message));
+                console.debug('Sent cancellation signal (SIGINT) via WebSocket:', message);
+            } else {
+                console.warn('Cannot send cancellation signal: WebSocket not open');
+            }
+        } catch (error) {
+            console.error('Error sending cancellation signal:', error);
+            this.showError('Failed to send cancellation signal');
         }
     }
     /**

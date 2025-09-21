@@ -38,6 +38,7 @@ export interface CommandOptions {
   pty?: boolean;
   timeout?: number;
   source?: CommandSource;
+  asyncTimeout?: number; // Optional timeout for async mode transition
 }
 
 export interface WebSocketMessage {
@@ -96,10 +97,7 @@ export interface QueuedCommand {
 export const QUEUE_CONSTANTS = {
   // Maximum number of commands that can be queued per session to prevent DoS
   MAX_QUEUE_SIZE: 100,
-  
-  // Maximum age for queued commands in milliseconds (5 minutes)
-  MAX_COMMAND_AGE_MS: 5 * 60 * 1000,
-  
+
   // Default timeout for queued commands if not specified
   DEFAULT_COMMAND_TIMEOUT_MS: 15000,
 } as const;
@@ -132,5 +130,36 @@ export interface CommandGatingError {
   message: string;
   browserCommands: BrowserCommandEntry[];
   retryAllowed: true;
+}
+
+// Task state tracking for background execution
+export enum TaskState {
+  RUNNING = "running",
+  COMPLETED = "completed",
+  FAILED = "failed",
+  CANCELLED = "cancelled"
+}
+
+// Background task tracking interface
+export interface BackgroundTask {
+  taskId: string;
+  command: string;
+  state: TaskState;
+  startTime: number;
+  endTime?: number;
+  result?: CommandResult;
+  error?: string;
+  source: CommandSource;
+  promise: Promise<CommandResult>;
+}
+
+// Task polling response interface
+export interface TaskPollResponse {
+  success: boolean;
+  taskId: string;
+  state: TaskState;
+  result?: CommandResult;
+  error?: string;
+  message?: string;
 }
 

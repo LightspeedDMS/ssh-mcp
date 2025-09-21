@@ -4,7 +4,6 @@ import {
 } from "./ssh-connection-manager.js";
 import { ErrorResponse } from "./types.js";
 import { PortManager } from "./port-discovery.js";
-import { CommandStateManager } from "./command-state-manager.js";
 import { TerminalSessionStateManager, SessionBusyError } from "./terminal-session-state-manager.js";
 import { Logger, log } from "./logger.js";
 import * as http from "http";
@@ -40,7 +39,6 @@ export class WebServerManager {
   private wss?: WebSocketServer;
   private sshManager: SSHConnectionManager;
   private portManager: PortManager;
-  private commandStateManager: CommandStateManager;
   private terminalStateManager: TerminalSessionStateManager;
   private config: WebServerManagerConfig;
   private webPort?: number;
@@ -67,14 +65,10 @@ export class WebServerManager {
 
     this.sshManager = sshManager;
     this.portManager = new PortManager();
-    this.commandStateManager = new CommandStateManager();
     this.terminalStateManager = terminalStateManager || new TerminalSessionStateManager();
-    
+
     // Initialize logger with 'file' transport for safe console output in web server context
     Logger.initialize('file', 'WebServer', 'logs/web-server.log');
-    
-    // Inject CommandStateManager into SSH manager for echo suppression coordination
-    this.sshManager.setCommandStateManager(this.commandStateManager);
     
     this.app = express();
 

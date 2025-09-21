@@ -31,6 +31,7 @@ interface SSHExecArgs {
   sessionName: string;
   command: string;
   timeout?: number;
+  asyncTimeout?: number;
 }
 
 interface SSHDisconnectArgs {
@@ -43,6 +44,11 @@ interface SSHGetMonitoringUrlArgs {
 
 interface SSHCancelCommandArgs {
   sessionName: string;
+}
+
+interface SSHPollTaskArgs {
+  sessionName: string;
+  taskId: string;
 }
 
 /**
@@ -225,6 +231,10 @@ export class MCPSSHServer {
                   type: "number",
                   description: "Timeout in milliseconds (optional)",
                 },
+                asyncTimeout: {
+                  type: "number",
+                  description: "Async timeout in milliseconds - transitions to async mode on timeout (optional)",
+                },
               },
               required: ["sessionName", "command"],
             },
@@ -280,6 +290,24 @@ export class MCPSSHServer {
               required: ["sessionName"],
             },
           },
+          {
+            name: "ssh_poll_task",
+            description: "Check status of background task in SSH session",
+            inputSchema: {
+              type: "object",
+              properties: {
+                sessionName: {
+                  type: "string",
+                  description: "Name of the SSH session",
+                },
+                taskId: {
+                  type: "string",
+                  description: "ID of the background task to check",
+                },
+              },
+              required: ["sessionName", "taskId"],
+            },
+          },
         ],
       };
     });
@@ -309,6 +337,10 @@ export class MCPSSHServer {
           case "ssh_cancel_command":
             return await this.handleSSHCancelCommand(
               args as unknown as SSHCancelCommandArgs,
+            );
+          case "ssh_poll_task":
+            return await this.handleSSHPollTask(
+              args as unknown as SSHPollTaskArgs,
             );
           default:
             throw new Error(`Unknown tool: ${name}`);
@@ -384,12 +416,22 @@ export class MCPSSHServer {
   private async handleSSHExec(
     args: SSHExecArgs,
   ): Promise<{ content: { type: string; text: string }[] }> {
-    const { sessionName, command, timeout } = args;
+    const { sessionName, command, timeout, asyncTimeout } = args;
 
     if (!sessionName || !command) {
       throw new Error(
         "Missing required parameters: sessionName and command are required",
       );
+    }
+
+    // Validate asyncTimeout parameter if provided
+    if (asyncTimeout !== undefined) {
+      if (typeof asyncTimeout !== 'number' || !Number.isInteger(asyncTimeout)) {
+        throw new Error("asyncTimeout must be an integer");
+      }
+      if (asyncTimeout <= 0) {
+        throw new Error("asyncTimeout must be a positive number");
+      }
     }
 
     // Check for browser command buffer content before execution
@@ -457,11 +499,12 @@ export class MCPSSHServer {
         const result = await this.sshManager.executeCommand(sessionName, command, {
           timeout,
           source: 'claude',
+          asyncTimeout,
         });
-        
+
         // Update browser command buffer with execution result
         this.sshManager.updateBrowserCommandResult(sessionName, mcpCommandId, result);
-        
+
         return {
           content: [
             {
@@ -482,6 +525,41 @@ export class MCPSSHServer {
           ],
         };
       } catch (error) {
+        // Handle async timeout transition
+        if (error instanceof Error && error.message === 'ASYNC_TIMEOUT') {
+          const asyncError = error as any;
+          const taskId = asyncError.taskId;
+
+          // Update browser command buffer to indicate async mode
+          this.sshManager.updateBrowserCommandResult(sessionName, mcpCommandId, {
+            stdout: '',
+            stderr: 'Command transitioned to async mode',
+            exitCode: -2  // Special code for async mode
+          });
+
+          // CRITICAL: Cleanup state for async timeout - session becomes available for new commands
+          this.terminalStateManager.completeCommandExecution(sessionName, mcpCommandId);
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    success: false,
+                    error: 'ASYNC_TIMEOUT',
+                    message: 'Command execution has transitioned to async mode. Use ssh_poll_task to check status.',
+                    taskId: taskId,
+                    pollingInstructions: 'Use ssh_poll_task with taskId to check command status',
+                  },
+                  null,
+                  2,
+                ),
+              },
+            ],
+          };
+        }
+
         // Update browser command buffer with error result
         const errorMessage = error instanceof Error ? error.message : String(error);
         this.sshManager.updateBrowserCommandResult(sessionName, mcpCommandId, {
@@ -489,11 +567,11 @@ export class MCPSSHServer {
           stderr: errorMessage,
           exitCode: 1  // Non-zero exit code indicates error
         });
-        
-        throw error;  // Re-throw to maintain existing error handling behavior
-      } finally {
+
         // CRITICAL: Always cleanup state, even if executeCommand throws
         this.terminalStateManager.completeCommandExecution(sessionName, mcpCommandId);
+
+        throw error;  // Re-throw to maintain existing error handling behavior
       }
     } catch (stateError) {
       // Handle state management errors (SessionBusyError, etc.)
@@ -703,6 +781,61 @@ export class MCPSSHServer {
     };
   }
 
+  private async handleSSHPollTask(
+    args: SSHPollTaskArgs,
+  ): Promise<{ content: { type: string; text: string }[] }> {
+    const { sessionName, taskId } = args;
+
+    if (!sessionName || !taskId) {
+      throw new Error("Missing required parameters: sessionName and taskId are required");
+    }
+
+    // Check if session exists
+    if (!this.sshManager.hasSession(sessionName)) {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: false,
+            error: "SESSION_NOT_FOUND",
+            message: `SSH session '${sessionName}' not found`
+          }, null, 2)
+        }]
+      };
+    }
+
+    try {
+      const task = await this.sshManager.getBackgroundTaskStatus(sessionName, taskId);
+
+      const response = {
+        success: true,
+        taskId: task.taskId,
+        state: task.state,
+        result: task.result,
+        error: task.error,
+        message: `Task is ${task.state}`
+      };
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(response, null, 2)
+        }]
+      };
+    } catch (error) {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: false,
+            error: "TASK_NOT_FOUND",
+            message: `Task '${taskId}' not found in session '${sessionName}'`
+          }, null, 2)
+        }]
+      };
+    }
+  }
+
   // Public API methods for testing and coordination
 
   isMCPRunning(): boolean {
@@ -726,6 +859,7 @@ export class MCPSSHServer {
       "ssh_disconnect",
       "ssh_get_monitoring_url",
       "ssh_cancel_command",
+      "ssh_poll_task",
     ];
   }
 
@@ -763,6 +897,12 @@ export class MCPSSHServer {
             args as SSHCancelCommandArgs,
           );
           return JSON.parse(cancelResult.content[0].text);
+        }
+        case "ssh_poll_task": {
+          const pollResult = await this.handleSSHPollTask(
+            args as SSHPollTaskArgs,
+          );
+          return JSON.parse(pollResult.content[0].text);
         }
         default:
           return { success: false, error: `Unknown tool: ${name}` };

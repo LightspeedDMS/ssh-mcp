@@ -213,9 +213,8 @@ describe("Queue Security Fixes Validation", () => {
       expect(result).toBeDefined();
       expect(result.exitCode).toBe(0);
       
-      // In production, stale commands would be automatically cleaned
-      // The MAX_COMMAND_AGE_MS constant is set to 5 minutes
-      expect(QUEUE_CONSTANTS.MAX_COMMAND_AGE_MS).toBe(5 * 60 * 1000);
+      // Note: Queue staleness system has been removed as part of timeout system cleanup
+      // Commands now have infinite execution capability without arbitrary age limits
     }, 10000);
   });
 
@@ -250,7 +249,7 @@ describe("Queue Security Fixes Validation", () => {
   describe("Production Robustness Constants", () => {
     it("should have reasonable queue management constants", () => {
       expect(QUEUE_CONSTANTS.MAX_QUEUE_SIZE).toBe(100);
-      expect(QUEUE_CONSTANTS.MAX_COMMAND_AGE_MS).toBe(5 * 60 * 1000); // 5 minutes
+      // MAX_COMMAND_AGE_MS removed as part of timeout system cleanup
       expect(QUEUE_CONSTANTS.DEFAULT_COMMAND_TIMEOUT_MS).toBe(15000); // 15 seconds
     });
 
@@ -258,10 +257,8 @@ describe("Queue Security Fixes Validation", () => {
       // MAX_QUEUE_SIZE should prevent memory exhaustion
       expect(QUEUE_CONSTANTS.MAX_QUEUE_SIZE).toBeGreaterThan(0);
       expect(QUEUE_CONSTANTS.MAX_QUEUE_SIZE).toBeLessThan(1000); // Reasonable upper bound
-      
-      // Command age should prevent stale command accumulation
-      expect(QUEUE_CONSTANTS.MAX_COMMAND_AGE_MS).toBeGreaterThan(60000); // At least 1 minute
-      expect(QUEUE_CONSTANTS.MAX_COMMAND_AGE_MS).toBeLessThan(30 * 60 * 1000); // Less than 30 minutes
+
+      // Note: Command age limits removed - infinite execution capability enabled
     });
   });
 

@@ -171,20 +171,16 @@ describe("Queue Security Fixes Summary", () => {
       console.log(`✓ Disconnect cleanup verified: ${rejectedCount} commands properly rejected`);
     }, 10000);
 
-    it("✓ FIX 4: Command Staleness Validation (Memory Leak Prevention)", async () => {
+    it("✓ REMOVED: Command Staleness System (Timeout System Cleanup)", async () => {
       await connectionManager.createConnection(mockConfig);
-      
-      // Verify constants are set for staleness
-      expect(QUEUE_CONSTANTS.MAX_COMMAND_AGE_MS).toBe(5 * 60 * 1000); // 5 minutes
-      expect(QUEUE_CONSTANTS.MAX_COMMAND_AGE_MS).toBeGreaterThan(60000); // At least 1 minute
-      
-      // The staleness cleanup runs automatically in processCommandQueue
-      // Commands older than MAX_COMMAND_AGE_MS get rejected
-      
-      // Create a normal command (should succeed)
+
+      // Command staleness system has been removed as part of timeout system cleanup
+      // Commands now have infinite execution capability without arbitrary age limits
+
+      // Create a command (should succeed without staleness checks)
       const result = await connectionManager.executeCommand(
         mockConfig.name,
-        "echo 'fresh command'",
+        "echo 'command without staleness limits'",
         { source: "claude" as CommandSource }
       );
       
@@ -196,12 +192,12 @@ describe("Queue Security Fixes Summary", () => {
     it("✓ PRODUCTION CONSTANTS: All security constants are reasonable", () => {
       // Verify all production constants
       expect(QUEUE_CONSTANTS.MAX_QUEUE_SIZE).toBe(100);
-      expect(QUEUE_CONSTANTS.MAX_COMMAND_AGE_MS).toBe(5 * 60 * 1000);
+      // MAX_COMMAND_AGE_MS removed as part of timeout system cleanup
       expect(QUEUE_CONSTANTS.DEFAULT_COMMAND_TIMEOUT_MS).toBe(15000);
-      
+
       // Verify they're reasonable for production use
       expect(QUEUE_CONSTANTS.MAX_QUEUE_SIZE).toBeLessThan(1000); // Not too high
-      expect(QUEUE_CONSTANTS.MAX_COMMAND_AGE_MS).toBeLessThan(30 * 60 * 1000); // Not too long
+      // Command age limits removed - infinite execution capability enabled
       expect(QUEUE_CONSTANTS.DEFAULT_COMMAND_TIMEOUT_MS).toBeGreaterThan(5000); // Reasonable timeout
       
       console.log("✓ All production constants verified as reasonable");
@@ -274,8 +270,8 @@ describe("Queue Security Fixes Summary", () => {
         },
         {
           issue: "Command Staleness (memory leak prevention)",
-          fix: "cleanStaleCommands() with MAX_COMMAND_AGE_MS",
-          status: "FIXED"
+          fix: "REMOVED - Timeout system cleanup for infinite execution",
+          status: "REMOVED"
         }
       ];
       
@@ -284,7 +280,7 @@ describe("Queue Security Fixes Summary", () => {
         console.log(`${fix.status === 'FIXED' ? '✅' : '❌'} ${fix.issue}: ${fix.fix}`);
       });
       
-      expect(securityFixes.every(fix => fix.status === 'FIXED')).toBe(true);
+      expect(securityFixes.every(fix => fix.status === 'FIXED' || fix.status === 'REMOVED')).toBe(true);
     });
   });
 });

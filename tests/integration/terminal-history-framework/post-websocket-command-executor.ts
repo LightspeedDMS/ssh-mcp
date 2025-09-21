@@ -803,6 +803,7 @@ export class PostWebSocketCommandExecutor {
     await this.delay(1000);
   }
 
+
   /**
    * Story 05: Cancel MCP command via ssh_cancel_command tool
    * Implements AC 5.5: MCP ssh_cancel_command cancellation

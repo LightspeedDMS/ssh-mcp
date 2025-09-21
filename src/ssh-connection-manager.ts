@@ -14,8 +14,9 @@ import {
   QueuedCommand,
   QUEUE_CONSTANTS,
   BrowserCommandEntry,
+  BackgroundTask,
+  TaskState,
 } from "./types.js";
-import { CommandStateManager } from "./command-state-manager.js";
 import { log } from "./logger.js";
 
 export interface ISSHConnectionManager {
@@ -64,6 +65,11 @@ export interface ISSHConnectionManager {
 
   // Session Health Check
   isSessionHealthy(sessionName: string): boolean;
+
+  // Background Task Management
+  getBackgroundTaskStatus(sessionName: string, taskId: string): Promise<BackgroundTask>;
+  getSessionBackgroundTasks(sessionName: string): Promise<BackgroundTask[]>;
+  getBackgroundTask(sessionName: string, taskId: string): Promise<BackgroundTask>;
 }
 
 export interface TerminalOutputEntry {
@@ -99,6 +105,7 @@ interface SessionData {
   currentDirectory?: string; // Cached current working directory for prompt generation
   connectionInfo: { username: string; host: string }; // For prompt generation
   isAtPrompt: boolean; // Tracks whether terminal is currently at prompt (ready for input)
+  backgroundTasks: Map<string, BackgroundTask>; // Background task storage for async execution
 }
 
 // Terminal output streaming interfaces
@@ -111,7 +118,6 @@ export class SSHConnectionManager implements ISSHConnectionManager {
   
   private connections: Map<string, SessionData> = new Map();
   private webServerPort: number;
-  private commandStateManager?: CommandStateManager;
 
   constructor(webServerPort: number = 8080) {
     // CRITICAL FIX: Removed console.log that was polluting stdio MCP communication
@@ -123,24 +129,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     this.webServerPort = port;
   }
 
-  /**
-   * Set the CommandStateManager for echo suppression coordination
-   */
-  setCommandStateManager(commandStateManager: CommandStateManager): void {
-    this.commandStateManager = commandStateManager;
-  }
 
-  /**
-   * Track command submission for echo suppression (used by both WebSocket and MCP commands)
-   */
-  trackCommandSubmission(sessionName: string, command: string): void {
-    if (this.commandStateManager) {
-      log.debug(`Tracking command submission: "${command}" for session: ${sessionName}`, 'SSHConnectionManager');
-      this.commandStateManager.onCommandSubmit(sessionName, command);
-    } else {
-      log.debug(`No CommandStateManager available for command tracking: ${sessionName}`, 'SSHConnectionManager');
-    }
-  }
 
   getWebServerPort(): number {
     return this.webServerPort;
@@ -373,6 +362,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
           isCommandExecuting: false,
           connectionInfo: { username: config.username, host: config.host },
           isAtPrompt: true, // SSH sessions start at prompt - ready for input
+          backgroundTasks: new Map<string, BackgroundTask>(), // Initialize background task storage
         };
 
         this.connections.set(config.name, sessionData);
@@ -433,8 +423,83 @@ export class SSHConnectionManager implements ISSHConnectionManager {
 
     const sessionData = this.getValidatedSession(connectionName);
 
-    // ALL commands use exec() - no shell session dependency
+    // Check for asyncTimeout parameter - determines execution mode
+    if (options.asyncTimeout !== undefined && options.source !== 'user') {
+      // Threaded execution mode for MCP commands with asyncTimeout
+      return this.executeCommandWithAsyncTimeout(sessionData, command, options);
+    } else {
+      // Traditional execution mode for browser commands or MCP commands without asyncTimeout
+      return this.executeCommandTraditional(sessionData, command, options);
+    }
+  }
 
+  private async executeCommandWithAsyncTimeout(
+    sessionData: SessionData,
+    command: string,
+    options: CommandOptions,
+  ): Promise<CommandResult> {
+    const asyncTimeout = options.asyncTimeout!;
+    const taskId = `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    // Create background task
+    const taskPromise = this.executeCommandInShellBackground(sessionData, {
+      command,
+      options,
+      taskId,
+    });
+
+    const backgroundTask: BackgroundTask = {
+      taskId,
+      command,
+      state: TaskState.RUNNING,
+      startTime: Date.now(),
+      source: options.source || 'claude',
+      promise: taskPromise,
+    };
+
+    // Store task in session
+    sessionData.backgroundTasks.set(taskId, backgroundTask);
+
+    // Use Promise.race for timeout handling
+    try {
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error(`ASYNC_TIMEOUT:${taskId}`));
+        }, asyncTimeout);
+      });
+
+      // Race between command completion and timeout
+      const result = await Promise.race([taskPromise, timeoutPromise]);
+
+      // Command completed before timeout
+      backgroundTask.state = TaskState.COMPLETED;
+      backgroundTask.endTime = Date.now();
+      backgroundTask.result = result;
+
+      return result;
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('ASYNC_TIMEOUT:')) {
+        // Timeout occurred - transition to async mode
+        // Task continues in background
+        const asyncError = new Error('ASYNC_TIMEOUT');
+        (asyncError as any).taskId = taskId;
+        throw asyncError;
+      } else {
+        // Actual execution error
+        backgroundTask.state = TaskState.FAILED;
+        backgroundTask.endTime = Date.now();
+        backgroundTask.error = error instanceof Error ? error.message : String(error);
+        throw error;
+      }
+    }
+  }
+
+  private async executeCommandTraditional(
+    sessionData: SessionData,
+    command: string,
+    options: CommandOptions,
+  ): Promise<CommandResult> {
+    // Traditional queue-based execution (existing logic)
     return new Promise((resolve, reject) => {
       // SECURITY FIX: Check queue size limit to prevent DoS attacks
       if (sessionData.commandQueue.length >= QUEUE_CONSTANTS.MAX_QUEUE_SIZE) {
@@ -467,14 +532,6 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       return;
     }
 
-    // Clean stale commands before processing (optional robustness feature)
-    this.cleanStaleCommands(sessionData);
-
-    // After cleaning, re-check if queue is empty
-    if (sessionData.commandQueue.length === 0) {
-      return;
-    }
-
     // Atomically get the next command and mark execution as started
     const queuedCommand = sessionData.commandQueue.shift();
     if (!queuedCommand) {
@@ -497,33 +554,39 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     this.executeCommandInShell(sessionData, commandEntry);
   }
 
-  /**
-   * Clean stale commands from queue to prevent memory leaks and improve responsiveness
-   * Commands older than MAX_COMMAND_AGE_MS are rejected with appropriate error
-   */
-  private cleanStaleCommands(sessionData: SessionData): void {
-    const currentTime = Date.now();
-    
-    // Filter out stale commands and reject them
-    sessionData.commandQueue = sessionData.commandQueue.filter((queuedCommand) => {
-      const commandAge = currentTime - queuedCommand.timestamp;
-      
-      if (commandAge > QUEUE_CONSTANTS.MAX_COMMAND_AGE_MS) {
-        // Reject stale command with appropriate error
-        queuedCommand.reject(new Error(
-          `Command expired after ${Math.round(commandAge / 1000)}s in queue. ` +
-          `Maximum age is ${Math.round(QUEUE_CONSTANTS.MAX_COMMAND_AGE_MS / 1000)}s.`
-        ));
-        return false; // Remove from queue
-      }
-      
-      return true; // Keep in queue
+
+  private async executeCommandInShellBackground(
+    sessionData: SessionData,
+    commandEntry: {
+      command: string;
+      options: CommandOptions;
+      taskId: string;
+    },
+  ): Promise<CommandResult> {
+    // Background task execution without queue management
+    return new Promise((resolve, reject) => {
+      this.executeCommandInShellCore(sessionData, {
+        command: commandEntry.command,
+        resolve,
+        reject,
+        options: commandEntry.options,
+      });
     });
-    
-    // Note: Stale commands are cleaned from queue as needed
   }
 
   private executeCommandInShell(
+    sessionData: SessionData,
+    commandEntry: {
+      command: string;
+      resolve: (result: CommandResult) => void;
+      reject: (error: Error) => void;
+      options: CommandOptions;
+    },
+  ): void {
+    this.executeCommandInShellCore(sessionData, commandEntry);
+  }
+
+  private executeCommandInShellCore(
     sessionData: SessionData,
     commandEntry: {
       command: string;
@@ -692,20 +755,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       // Collect stdout
       stream.on('data', (data: Buffer) => {
         stdout += data.toString();
-        // Reset timeout on data activity
-        if (timeoutHandle) {
-          clearTimeout(timeoutHandle);
-          timeoutHandle = setTimeout(() => {
-            stream.destroy();
-            commandEntry.reject(
-              new Error(
-                `Command '${commandEntry.command}' timed out after ${timeoutMs}ms`,
-              ),
-            );
-            sessionData.isCommandExecuting = false;
-            this.processCommandQueue(sessionData);
-          }, timeoutMs);
-        }
+        // Note: Activity-based timeout reset removed for infinite execution capability
       });
 
       // Collect stderr
@@ -1616,8 +1666,6 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     }
 
     // In exec()-only model, terminal input is executed as a command
-    // Track the command submission for echo suppression
-    this.trackCommandSubmission(sessionName, input.trim());
 
     // Execute the input as a command with user source
     this.executeCommand(sessionName, input.trim(), { source: 'user' })
@@ -1676,10 +1724,35 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       "system"
     );
 
-    // If it's SIGINT, we could potentially cancel queued commands
-    if (signal === 'SIGINT' && sessionData.commandQueue.length > 0) {
-      log.debug(`SIGINT signal: cancelling ${sessionData.commandQueue.length} queued commands for session ${sessionName}`);
-      this.rejectAllQueuedCommands(sessionData, 'Interrupted by SIGINT signal');
+    // If it's SIGINT, cancel all queued/running operations and clear browser buffer
+    if (signal === 'SIGINT') {
+      // Clear browser command buffer (CRITICAL FIX for test failures)
+      const browserCommandsCleared = sessionData.browserCommandBuffer.length;
+      sessionData.browserCommandBuffer = [];
+      log.debug(`SIGINT signal: cleared ${browserCommandsCleared} browser commands for session ${sessionName}`);
+
+      // Cancel queued commands
+      if (sessionData.commandQueue.length > 0) {
+        log.debug(`SIGINT signal: cancelling ${sessionData.commandQueue.length} queued commands for session ${sessionName}`);
+        this.rejectAllQueuedCommands(sessionData, 'Interrupted by SIGINT signal');
+      }
+
+      // Update background tasks to CANCELLED state
+      if (sessionData.backgroundTasks && sessionData.backgroundTasks.size > 0) {
+        let cancelledTaskCount = 0;
+        for (const [taskId, task] of sessionData.backgroundTasks) {
+          if (task.state === TaskState.RUNNING) {
+            task.state = TaskState.CANCELLED;
+            task.endTime = Date.now();
+            task.error = 'Cancelled by SIGINT signal';
+            cancelledTaskCount++;
+            log.debug(`SIGINT signal: cancelled background task ${taskId} for session ${sessionName}`);
+          }
+        }
+        if (cancelledTaskCount > 0) {
+          log.debug(`SIGINT signal: cancelled ${cancelledTaskCount} background tasks for session ${sessionName}`);
+        }
+      }
     }
   }
 
@@ -1915,6 +1988,54 @@ export class SSHConnectionManager implements ISSHConnectionManager {
       trimmedCommand.includes('cd;') ||
       trimmedCommand.includes('cd&&')
     );
+  }
+
+  // Background Task Management Implementation
+
+  async getBackgroundTaskStatus(sessionName: string, taskId: string): Promise<BackgroundTask> {
+    this.validateSessionName(sessionName);
+    const sessionData = this.getValidatedSession(sessionName);
+
+    const task = sessionData.backgroundTasks.get(taskId);
+    if (!task) {
+      throw new Error(`Task ${taskId} not found in session ${sessionName}`);
+    }
+
+    // Update task state if promise is settled
+    if (task.state === TaskState.RUNNING) {
+      try {
+        const result = await Promise.race([
+          task.promise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('POLL_TIMEOUT')), 100))
+        ]);
+
+        // Task completed
+        task.state = TaskState.COMPLETED;
+        task.endTime = Date.now();
+        task.result = result as CommandResult;
+      } catch (error) {
+        if (error instanceof Error && error.message !== 'POLL_TIMEOUT') {
+          // Task failed
+          task.state = TaskState.FAILED;
+          task.endTime = Date.now();
+          task.error = error.message;
+        }
+        // If POLL_TIMEOUT, task is still running
+      }
+    }
+
+    return { ...task };
+  }
+
+  async getSessionBackgroundTasks(sessionName: string): Promise<BackgroundTask[]> {
+    this.validateSessionName(sessionName);
+    const sessionData = this.getValidatedSession(sessionName);
+
+    return Array.from(sessionData.backgroundTasks.values()).map(task => ({ ...task }));
+  }
+
+  async getBackgroundTask(sessionName: string, taskId: string): Promise<BackgroundTask> {
+    return this.getBackgroundTaskStatus(sessionName, taskId);
   }
 
 }

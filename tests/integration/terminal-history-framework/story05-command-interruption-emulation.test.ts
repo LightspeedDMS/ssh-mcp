@@ -202,11 +202,11 @@ describe('Story 05: Command Interruption Emulation', () => {
       it('should send WebSocket SIGINT signal for browser command cancellation', async () => {
         // Given: Browser command with cancellation
         const commands: EnhancedCommandParameter[] = [
-          { 
-            initiator: 'browser', 
-            command: 'find . -name "*.log"', 
-            cancel: true, 
-            waitToCancelMs: 2000 
+          {
+            initiator: 'browser',
+            command: 'sleep 10',
+            cancel: true,
+            waitToCancelMs: 2000
           }
         ];
 

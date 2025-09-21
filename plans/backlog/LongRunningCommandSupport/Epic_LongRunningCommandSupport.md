@@ -1,196 +1,146 @@
-# Epic: Long-Running Command Support
+# Epic: Long Running Command Support
 
 ## Epic Overview
 **Epic ID:** LongRunningCommandSupport
 **Priority:** High
 **Status:** Planning
-**Created:** 2025-09-15
-**Updated:** 2025-09-15
 
-## Executive Summary
-Enable the SSH MCP server to handle commands that run for minutes to hours without blocking MCP clients, while maintaining backward compatibility and dual-input architecture (MCP + browser). The system will automatically switch to asynchronous mode for commands exceeding 60 seconds, provide polling capabilities for MCP clients, and maintain infinite wait support for browser users.
+## Problem Statement
+[Conversation Reference: User stated "Remove echo suppression system (100ms window) - over-engineered for current architecture", "Remove queue staleness timeouts (5-minute expiry) - replace with infinite wait + explicit cancellation", "Remove command state cleanup (30-second GC) - unnecessary metadata cleanup", "Remove activity-reset timeout - replace with infinite real timeout"]
 
-## Business Value
-### Problem Statement
-Currently, the SSH MCP server uses a 15-second timeout with nuclear fallback, which blocks MCP clients and prevents execution of legitimate long-running commands like system updates, builds, or data processing operations. This limitation forces users to work around the system rather than with it.
+Current timeout architecture contains over-engineered systems that need complete removal and replacement with simpler infinite wait + explicit cancellation model.
 
-### Solution Benefits
-- **Unblocked Operations**: MCP clients can initiate long-running commands and continue with other tasks
-- **Browser Compatibility**: Browser users maintain familiar infinite-wait experience with visual feedback
-- **Universal Control**: MCP clients gain authority to cancel any running command, including browser-initiated ones
-- **Resource Efficiency**: Single command per session prevents resource exhaustion
-- **Backward Compatibility**: Existing short commands continue working without modification
+## Solution Approach
+[Conversation Reference: User outlined specific architectural approach: "Use threaded task approach for MCP commands with optional asyncTimeout parameter", "Browser commands infinite wait (no timeout mechanism)", "Timed wait with timeout → return error to MCP client → keep task running in background", "Store task reference in session for polling"]
 
-## Technical Architecture
-### Core Design Principles
-1. **60-Second Threshold**: Automatic transition from synchronous to asynchronous mode
-2. **Session-Based Identification**: No command IDs - use sessionName only
-3. **Single Command Rule**: One command per session at a time
-4. **Simple RAM Storage**: Basic session fields, no complex systems
-5. **Result Persistence**: Results persist until next command execution
+Replace complex timeout systems with threaded task execution, background task persistence, and explicit cancellation mechanisms.
 
-### State Management
-- **Command States**: `running`, `completed`, `cancelled`, `failed`
-- **Storage**: Simple fields in existing SessionData interface (RAM-only)
-- **Fields Added**: `lastCommand`, `lastOutput`, `lastExitCode`, `lastState`, `lastStartTime`, `lastEndTime`
-- **Cleanup**: Automatic when next command starts
+## Core Design Principles
+[Conversation Reference: User specified "KISS approach", "One active task per session, rest queue in FIFO order", "Browser and MCP commands use identical code path"]
 
-### API Specifications
-- **Existing Modified**: `ssh_exec` returns async notification after 60 seconds
-- **New APIs**:
-  - `ssh_get_long_running_command_state(sessionName)`: Returns simple state object
-  - `ssh_cancel_running_command(sessionName)`: Cancels current command in session
+1. **Simplicity First**: Remove over-engineered timeout mechanisms
+2. **Single Task Model**: One active task per session with FIFO queuing
+3. **Unified Code Path**: Browser and MCP commands use identical execution path
+4. **Infinite Wait**: No automatic timeouts, only explicit cancellation
+5. **Background Persistence**: Tasks continue running after MCP timeout
 
-## Features
+## Features Implementation Order
 
 ### Feature Breakdown
-[ ] **01_Feat_LongRunningCommandPolling** - Async mode transition and polling workflow
-[ ] **02_Feat_UniversalCommandCancellation** - MCP cancellation authority and notifications
-[ ] **03_Feat_BrowserLongCommandCompatibility** - Browser infinite wait capability
+- [ ] **01_Feat_TimeoutArchitectureCleanup** - Remove existing timeout systems
+- [ ] **02_Feat_AsyncExecutionViaThreading** - Implement threaded task execution
+- [ ] **03_Feat_PollingAPIImplementation** - Background task status checking
+- [ ] **04_Feat_UniversalCancellationSystem** - MCP and browser cancellation
 
-### Implementation Order
-1. **Feature 1** (LongRunningCommandPolling) - Must complete first
-2. **Feature 2** (UniversalCommandCancellation) - Depends on Feature 1
-3. **Feature 3** (BrowserLongCommandCompatibility) - Can develop in parallel
+### Sequential Dependencies
+[Conversation Reference: User requested "conversation plan" with "sequential phases"]
+
+**Phase 1**: Timeout Architecture Cleanup (Foundation)
+**Phase 2**: Async Execution via Threading (Core Capability)
+**Phase 3**: Polling API Implementation (Status Checking)
+**Phase 4**: Universal Cancellation System (Control Mechanism)
+
+## Behavioral Changes
+[Conversation Reference: User specified "ssh_exec returns ERROR when going async (not backward compatible)", "WebSocket only sends: successful results + cancellation notifications"]
+
+### Breaking Changes
+- **ssh_exec Behavior**: Returns ERROR when transitioning to async mode (intentionally not backward compatible)
+- **WebSocket Messaging**: Only sends successful results and cancellation notifications
+- **Queue Management**: Single active command with FIFO queue for additional commands
+
+### Error Handling Philosophy
+[Conversation Reference: User emphasized "Clean error messages for dead tasks (graceful failure)"]
+
+- **Graceful Failure**: Clean error messages for dead or failed tasks
+- **Error Persistence**: Task failures stored for polling retrieval
+- **Clear Communication**: Explicit async mode error notifications
+
+## Technical Architecture
+
+### Session State Management
+[Conversation Reference: User specified "Store task reference in session for polling"]
+
+- **Task Storage**: Session-based task reference storage
+- **State Tracking**: Running/completed/failed/cancelled states
+- **Result Persistence**: Task outputs persist until next command
+
+### Cancellation Mechanisms
+[Conversation Reference: User detailed "ssh_cancel_command MCP tool", "Browser Ctrl-C capture via WebSocket", "Cancel running command + clear entire queue", "SSH2 library cancellation via stream.write('\x03') + stream.destroy()"]
+
+- **MCP Cancellation**: ssh_cancel_command tool for programmatic cancellation
+- **Browser Cancellation**: Ctrl-C capture via WebSocket for user cancellation
+- **Queue Clearing**: Cancel active command and clear entire session queue
+- **SSH2 Integration**: Use stream.write('\x03') + stream.destroy() for process termination
 
 ## Success Criteria
-### Functional Requirements
-- ✅ Commands >60s automatically switch to async mode
-- ✅ MCP clients receive immediate async notification
-- ✅ Polling API returns complete state and output
-- ✅ MCP clients can cancel any running command
-- ✅ Browser users see cancellation notifications
-- ✅ Browser maintains infinite wait capability
-- ✅ Results persist until next command
-- ✅ Single long-running command per session enforced
 
-### Performance Requirements
-- Response time <100ms for async mode notification
-- Polling response time <50ms
-- Cancellation effect within 1 second
+### Core Functionality
+[Conversation Reference: Based on user's architectural requirements]
 
-### Testing Requirements
-- Primary testing with `sleep 120` and `sleep 65` commands
-- Polling state retrieval validation
-- Cancellation effectiveness testing
-- WebSocket notification delivery for "[CANCELLED] Command terminated by MCP client"
-- Backward compatibility with commands under 60 seconds
+✅ **Timeout Removal**: All echo suppression, queue staleness, and cleanup timeouts removed
+✅ **Async Threading**: Commands execute in background threads with asyncTimeout parameter support
+✅ **Polling Access**: ssh_get_command_status provides background task status checking
+✅ **Universal Cancellation**: Both MCP and browser can cancel any running command
+✅ **Error Communication**: Clean async mode error messages with polling instructions
+✅ **Queue Management**: Single active task per session with FIFO ordering
 
-## Dependencies
-### External Dependencies
-- SSH2 library async command execution support
-- WebSocket for browser notifications
-- Process management for command cancellation
+### Integration Requirements
+✅ **Code Path Unification**: Browser and MCP commands use identical execution path
+✅ **WebSocket Notifications**: Cancellation notifications broadcast to browser
+✅ **Session Isolation**: Task references stored per session without cross-contamination
+✅ **Graceful Degradation**: Dead task detection with clean error messages
 
-### Internal Dependencies
-- Current session management system
-- Existing MCP protocol implementation
-- WebSocket browser terminal infrastructure
+## Implementation Strategy
 
-## Risk Assessment
+### Development Phases
+[Conversation Reference: User requested sequential implementation approach]
+
+**Phase 1: Foundation** - Remove existing timeout architecture completely
+**Phase 2: Core Engine** - Implement threaded task execution with session storage
+**Phase 3: Status Interface** - Build polling API for background task monitoring
+**Phase 4: Control Layer** - Add universal cancellation capabilities
+
+### Testing Approach
+[Conversation Reference: Based on user's emphasis on "Clean error messages for dead tasks"]
+
+- **Background Task Validation**: Verify tasks continue after MCP timeout
+- **Cancellation Testing**: Validate both MCP and browser cancellation effectiveness
+- **Error Message Testing**: Confirm clean error communication for all failure modes
+- **Queue Behavior Testing**: Verify FIFO queue management and single task enforcement
+
+## Risk Mitigation
+
 ### Technical Risks
-- **Process Orphaning**: Commands continuing after cancellation
-  - *Mitigation*: Proper signal handling via SSH channel
-- **State Synchronization**: Browser/MCP state divergence
-  - *Mitigation*: Single source of truth in session data
+- **Process Orphaning**: Tasks continuing without proper cleanup
+  - *Mitigation*: Proper SSH2 stream management and signal handling
+- **Session State Corruption**: Invalid task references or state inconsistencies
+  - *Mitigation*: Session-based isolation and atomic state updates
 
-### Business Risks
-- **Breaking Changes**: Impact on existing integrations
-  - *Mitigation*: Full backward compatibility maintained
-- **User Experience**: Confusion with async mode transition
-  - *Mitigation*: Clear async notification message
+### Compatibility Risks
+- **Breaking Change Impact**: ssh_exec error responses affecting existing integrations
+  - *Mitigation*: Clear error messages with migration guidance
+- **WebSocket Message Changes**: Modified notification patterns affecting browser clients
+  - *Mitigation*: Maintain essential notification delivery while removing unnecessary messages
 
-## Acceptance Criteria
-```gherkin
-Feature: Long-Running Command Support
-  As a system administrator
-  I want to execute long-running commands without blocking
-  So that I can perform system maintenance and monitoring tasks
+## Definition of Done
 
-  Scenario: Command switches to async mode after 60 seconds
-    Given an SSH session is established
-    When I execute a command that runs for more than 60 seconds
-    Then the system switches to async mode
-    And I receive an async notification with polling instructions
-    And the command continues executing in the background
+### Functional Completeness
+- [ ] All timeout systems (echo suppression, queue staleness, cleanup, activity-reset) completely removed
+- [ ] Threaded task execution with asyncTimeout parameter support implemented
+- [ ] ssh_get_command_status API providing background task status and results
+- [ ] ssh_cancel_command MCP tool with queue clearing capability
+- [ ] Browser Ctrl-C cancellation via WebSocket integration
+- [ ] Single active task per session with FIFO queue management
+- [ ] Unified code path for browser and MCP command execution
 
-  Scenario: Polling for command state and output
-    Given a long-running command is executing in async mode
-    When I call ssh_get_long_running_command_state with sessionName
-    Then I receive the current state (running/completed/failed/cancelled)
-    And I receive any accumulated output
-    And I receive the exit code if completed
+### Quality Standards
+- [ ] Clean error messages for all failure scenarios (dead tasks, async transitions, cancellations)
+- [ ] Session-based task isolation preventing cross-session interference
+- [ ] Graceful failure handling with informative error responses
+- [ ] WebSocket notification system delivering only successful results and cancellations
 
-  Scenario: MCP client cancels running command
-    Given a long-running command is executing
-    When an MCP client calls ssh_cancel_running_command with sessionName
-    Then the command is terminated within 1 second
-    And the state changes to "cancelled"
-    And browser users see "[CANCELLED] Command terminated by MCP client"
-
-  Scenario: Browser maintains infinite wait
-    Given a browser user executes a long-running command
-    When the command exceeds 60 seconds
-    Then the browser continues waiting for completion
-    And the terminal shows real-time output
-    And the user can cancel via browser interface
-```
-
-## Implementation Notes
-### Phase 1: Foundation (Feature 1)
-- Implement 60-second threshold detection in ssh_exec
-- Add simple session fields for state storage
-- Create ssh_get_long_running_command_state API
-- Return async notification to MCP client
-
-### Phase 2: Control (Feature 2)
-- Implement ssh_cancel_running_command API
-- Send cancellation signal via SSH channel
-- Broadcast "[CANCELLED] Command terminated by MCP client" to browser
-- Update session state to cancelled
-
-### Phase 3: Compatibility (Feature 3)
-- Ensure browser continues waiting forever (no timeout changes)
-- Maintain real-time output streaming
-- Browser receives all notifications including cancellation
-
-## Documentation Requirements
-- API documentation for new endpoints
-- Usage examples with sleep commands
-- Browser behavior documentation
-
-## Testing Strategy
-### Primary Test Commands
-- `sleep 120` - Test async mode transition at 60 seconds
-- `sleep 65` - Test just over threshold
-- `sleep 30` - Test commands under threshold (sync mode)
-
-### Test Scenarios
-- Command transitions to async mode after 60 seconds
-- Polling returns correct state and output
-- Cancellation works from MCP client
-- Browser receives cancellation message
-- Results persist until next command
-
-## Release Strategy
-- Test with sleep commands locally
-- Verify backward compatibility
-- Deploy with confidence
-
-## Timeline Estimate
-- **Feature 1**: 2 days (simple async mode and polling)
-- **Feature 2**: 1 day (basic cancellation)
-- **Feature 3**: 1 day (browser compatibility verified)
-- **Testing**: 1 day
-- **Total Estimate**: 5 days
-
-## Dependencies and Blockers
-### Prerequisites
-- Current regression tests must pass
-- Session management system stable
-- WebSocket infrastructure operational
-
-### Potential Blockers
-- SSH2 library limitations
-- Process management complexities
-- Browser WebSocket compatibility issues
+### Validation Requirements
+- [ ] Background task persistence verified after MCP client timeout
+- [ ] Universal cancellation effectiveness confirmed for both MCP and browser sources
+- [ ] FIFO queue behavior validated under multiple command scenarios
+- [ ] Error message clarity confirmed for async mode transitions and dead tasks
