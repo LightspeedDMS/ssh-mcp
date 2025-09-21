@@ -98,6 +98,7 @@ interface SessionData {
   isCommandExecuting: boolean;
   currentDirectory?: string; // Cached current working directory for prompt generation
   connectionInfo: { username: string; host: string }; // For prompt generation
+  isAtPrompt: boolean; // Tracks whether terminal is currently at prompt (ready for input)
 }
 
 // Terminal output streaming interfaces
@@ -371,6 +372,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
           commandQueue: [],
           isCommandExecuting: false,
           connectionInfo: { username: config.username, host: config.host },
+          isAtPrompt: true, // SSH sessions start at prompt - ready for input
         };
 
         this.connections.set(config.name, sessionData);
@@ -599,6 +601,11 @@ export class SSHConnectionManager implements ISSHConnectionManager {
         const fullOutput = stdout + (stderr ? '\n' + stderr : '');
         const source = commandEntry.options.source || 'claude';
 
+        // Clear prompt state for browser commands since they don't need conditional prompt logic
+        if (source === 'user') {
+          sessionData.isAtPrompt = false; // Command executed, no longer at prompt
+        }
+
         if (source === 'user') {
           // Rule 2a/2b/2c: Real-time WebSocket commands (browser) with prompt injection
           // Rule 2a: Store command cleanly
@@ -616,12 +623,21 @@ export class SSHConnectionManager implements ISSHConnectionManager {
           // Rule 2c: Send ready prompt
           const prompt = this.formatPrompt(sessionData);
           this.broadcastToLiveListenersRaw(sessionData.connection.name, `${prompt} `, 'system');
+          sessionData.isAtPrompt = true; // Terminal is now at prompt, ready for input
         } else {
-          // Rule 3b/3c/3d: Real-time MCP commands with prompt injection
-          // Rule 3b: Send prompt + command + CRLF (WITH PROMPT for proper command echo)
-          const prompt = this.formatPrompt(sessionData);
-          const commandWithPrompt = `${prompt} ${commandEntry.command}\r\n`;
-          this.broadcastToLiveListenersRaw(sessionData.connection.name, commandWithPrompt, source);
+          // Rule 3b/3c/3d: Real-time MCP commands with conditional prompt injection
+          // Rule 3b: Send prompt + command + CRLF (ONLY if terminal is not already at prompt)
+          if (sessionData.isAtPrompt) {
+            // Terminal is already at prompt - just send command without extra prompt
+            const commandWithoutPrompt = `${commandEntry.command}\r\n`;
+            this.broadcastToLiveListenersRaw(sessionData.connection.name, commandWithoutPrompt, source);
+            sessionData.isAtPrompt = false; // No longer at prompt - command is executing
+          } else {
+            // Terminal is not at prompt - send prompt + command
+            const prompt = this.formatPrompt(sessionData);
+            const commandWithPrompt = `${prompt} ${commandEntry.command}\r\n`;
+            this.broadcastToLiveListenersRaw(sessionData.connection.name, commandWithPrompt, source);
+          }
           this.storeCommandInHistory(sessionData.connection.name, commandEntry.command, source);
 
           // Rule 3c: Send result + CRLF if there's output
@@ -636,6 +652,8 @@ export class SSHConnectionManager implements ISSHConnectionManager {
           // Rule 3d: Send ready prompt
           const newPrompt = this.formatPrompt(sessionData);
           this.broadcastToLiveListenersRaw(sessionData.connection.name, `${newPrompt} `, 'system');
+          sessionData.isAtPrompt = true; // Terminal is now at prompt, ready for input
+          // MCP command completed, terminal now at prompt
         }
 
         // Record in command history
