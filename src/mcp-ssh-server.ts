@@ -10,6 +10,12 @@ import { SSHConnectionManager } from "./ssh-connection-manager.js";
 import { TerminalSessionStateManager, SessionBusyError } from "./terminal-session-state-manager.js";
 import { Logger, log } from "./logger.js";
 import { WebServerManager } from "./web-server-manager.js";
+import * as fs from "fs";
+import * as path from "path";
+import { fileURLToPath } from 'url';
+
+// ES module dirname equivalent
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export interface MCPSSHServerConfig {
   sshTimeout?: number;
@@ -88,7 +94,7 @@ export class MCPSSHServer {
     this.mcpServer = new Server(
       {
         name: "ssh-mcp-server",
-        version: "1.0.0",
+        version: "2.1.0",
       },
       {
         capabilities: {
@@ -314,6 +320,15 @@ export class MCPSSHServer {
               required: ["sessionName", "taskId"],
             },
           },
+          {
+            name: "ssh_version",
+            description: "Get SSH MCP server version and build information",
+            inputSchema: {
+              type: "object",
+              properties: {},
+              required: [],
+            },
+          },
         ],
       };
     });
@@ -348,6 +363,8 @@ export class MCPSSHServer {
             return await this.handleSSHPollTask(
               args as unknown as SSHPollTaskArgs,
             );
+          case "ssh_version":
+            return await this.handleSSHVersion();
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -930,6 +947,57 @@ export class MCPSSHServer {
     }
   }
 
+  private async handleSSHVersion(): Promise<{ content: { type: string; text: string }[] }> {
+    try {
+      // Handle both development and built contexts
+      const packagePath = fs.existsSync(path.join(__dirname, '../../package.json'))
+        ? path.join(__dirname, '../../package.json')
+        : path.join(__dirname, '../../../package.json');
+
+      const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+
+      const versionInfo = {
+        name: packageJson.name,
+        version: packageJson.version,
+        serverVersion: "2.1.0",
+        description: packageJson.description,
+        buildInfo: {
+          nodeVersion: process.version,
+          platform: process.platform,
+          arch: process.arch
+        },
+        capabilities: [
+          "ssh_connect",
+          "ssh_exec",
+          "ssh_disconnect",
+          "ssh_list_sessions",
+          "ssh_get_monitoring_url",
+          "ssh_cancel_command",
+          "ssh_poll_task",
+          "ssh_version"
+        ]
+      };
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(versionInfo, null, 2)
+        }]
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: false,
+            error: `Failed to read version information: ${errorMessage}`
+          }, null, 2)
+        }]
+      };
+    }
+  }
+
   // Public API methods for testing and coordination
 
   isMCPRunning(): boolean {
@@ -954,6 +1022,7 @@ export class MCPSSHServer {
       "ssh_get_monitoring_url",
       "ssh_cancel_command",
       "ssh_poll_task",
+      "ssh_version",
     ];
   }
 
@@ -997,6 +1066,10 @@ export class MCPSSHServer {
             args as SSHPollTaskArgs,
           );
           return JSON.parse(pollResult.content[0].text);
+        }
+        case "ssh_version": {
+          const versionResult = await this.handleSSHVersion();
+          return JSON.parse(versionResult.content[0].text);
         }
         default:
           return { success: false, error: `Unknown tool: ${name}` };

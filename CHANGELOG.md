@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2025-09-22
+
+### Added
+- **ssh_version tool**: New MCP endpoint for version introspection and build information
+- **Complete browser terminal editing support**: Mid-line character insertion and deletion
+- **Delete key functionality**: Standard terminal delete key behavior with proper text handling
+- **Unicode character support**: Expanded character input range including accented characters and tab
+- **Enhanced navigation**: Improved Home/End key behavior for line-based navigation
+
+### Fixed
+- **Echo suppression abomination removal**: Eliminated client-side output filtering for server-controlled display
+- **Multi-character input vulnerability**: Fixed cursor positioning for paste operations and multi-byte characters
+- **XSS security vulnerability**: Secured error message display against script injection
+- **Mid-line backspace artifacts**: Resolved visual spacing issues during character deletion
+- **Browser editing synchronization**: Perfect alignment between visual display and internal command state
+
+### Security
+- **Axios CVE-2025-58754**: Upgraded to axios@1.12.2 to fix DoS vulnerability via data: URIs
+- **XSS prevention**: Replaced innerHTML with textContent for user-provided error messages
+- **Input validation**: Enhanced character validation and boundary checking
+
+### Technical
+- **Surgical implementation**: Precise line-level fixes maintaining zero regression risk
+- **ES module compatibility**: Fixed __dirname issues for proper module resolution
+- **Version synchronization**: Aligned package.json and server versions for consistency
+- **Code quality improvements**: Eliminated complexity and improved maintainability
+
 ## [2.0.1] - 2025-09-12
 
 ### Fixed

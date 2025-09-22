@@ -1,6 +1,6 @@
 {
   "name": "ls-ssh-mcp",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "type": "module",
   "description": "SSH connection management for Claude Code with MCP integration",
   "main": "dist/index.js",

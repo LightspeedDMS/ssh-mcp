@@ -60,7 +60,7 @@ class TerminalInputHandler {
             else if (charCode === 3) { // Ctrl-C - Send cancellation signal
                 this.sendCancellationSignal();
             }
-            else if (charCode >= 32 && charCode < 127) { // Printable characters
+            else if (charCode >= 32 || charCode === 9) { // Printable characters and tab
                 this.handlePrintableCharacter(data);
             }
             // Ignore other control characters
@@ -103,7 +103,7 @@ class TerminalInputHandler {
             this.state.currentLine.slice(0, this.state.cursorPosition) +
                 char +
                 this.state.currentLine.slice(this.state.cursorPosition);
-        this.state.cursorPosition++;
+        this.state.cursorPosition += char.length;
         // LOCAL ECHO: Handle mid-line insertion properly
         if (this.state.cursorPosition === this.state.currentLine.length) {
             // Cursor at end - simple character write
@@ -149,6 +149,32 @@ class TerminalInputHandler {
         }
     }
     /**
+     * Handle delete key with proper cursor management
+     */
+    handleDeleteAtCursor() {
+        if (this.state.cursorPosition < this.state.currentLine.length) {
+            // Remove character at cursor position
+            this.state.currentLine =
+                this.state.currentLine.slice(0, this.state.cursorPosition) +
+                    this.state.currentLine.slice(this.state.cursorPosition + 1);
+
+            // LOCAL ECHO: Handle mid-line deletion properly
+            if (this.state.cursorPosition === this.state.currentLine.length) {
+                // Cursor at end after deletion - simple space clear
+                this.terminal.write(' \b');
+            } else {
+                // Cursor in middle - redraw remaining text and clear trailing space
+                const remainingText = this.state.currentLine.slice(this.state.cursorPosition);
+                this.terminal.write(remainingText + ' ');
+                // Move cursor back to correct position (same position after deletion)
+                const moveBackCount = remainingText.length + 1;
+                if (moveBackCount > 0) {
+                    this.terminal.write('\x1b[' + moveBackCount + 'D');
+                }
+            }
+        }
+    }
+    /**
      * Handle escape sequences (arrow keys, home, end, etc.)
      */
     handleEscapeSequence(sequence) {
@@ -169,13 +195,20 @@ class TerminalInputHandler {
             case '\x1b[1~':
                 const movesToStart = this.state.cursorPosition;
                 this.state.cursorPosition = 0;
-                this.terminal.write('\x1b[H'); // Local cursor movement with visual feedback
+                if (movesToStart > 0) {
+                    this.terminal.write('\x1b[' + movesToStart + 'D'); // Move left to line start
+                }
                 break;
             case '\x1b[F': // End key
             case '\x1b[4~':
                 const movesToEnd = this.state.currentLine.length - this.state.cursorPosition;
                 this.state.cursorPosition = this.state.currentLine.length;
-                this.terminal.write('\x1b[F'); // Local cursor movement with visual feedback
+                if (movesToEnd > 0) {
+                    this.terminal.write('\x1b[' + movesToEnd + 'C'); // Move right to line end
+                }
+                break;
+            case '\x1b[3~': // Delete key
+                this.handleDeleteAtCursor();
                 break;
             // Ignore other escape sequences to prevent terminal manipulation
         }
@@ -279,7 +312,7 @@ class TerminalInputHandler {
     showError(message) {
         const statusElement = document.getElementById('connection-status');
         if (statusElement) {
-            statusElement.innerHTML = `⚠️ Error: ${message}`;
+            statusElement.textContent = `⚠️ Error: ${message}`;
             statusElement.style.color = '#ff6b6b';
         }
         console.error('Terminal Handler Error:', message);
