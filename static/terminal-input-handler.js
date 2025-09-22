@@ -104,8 +104,20 @@ class TerminalInputHandler {
                 char +
                 this.state.currentLine.slice(this.state.cursorPosition);
         this.state.cursorPosition++;
-        // LOCAL ECHO: Show character as user types for immediate feedback
-        this.terminal.write(char);
+        // LOCAL ECHO: Handle mid-line insertion properly
+        if (this.state.cursorPosition === this.state.currentLine.length) {
+            // Cursor at end - simple character write
+            this.terminal.write(char);
+        } else {
+            // Cursor in middle - write char + remaining text + reposition cursor
+            const remainingText = this.state.currentLine.slice(this.state.cursorPosition);
+            this.terminal.write(char + remainingText);
+            // Move cursor back to correct position (after inserted character)
+            const moveBackCount = remainingText.length;
+            if (moveBackCount > 0) {
+                this.terminal.write('\x1b[' + moveBackCount + 'D');
+            }
+        }
         // SSH server echo provides the visual feedback, local echo is not needed
     }
     /**
@@ -118,8 +130,22 @@ class TerminalInputHandler {
                 this.state.currentLine.slice(0, this.state.cursorPosition - 1) +
                     this.state.currentLine.slice(this.state.cursorPosition);
             this.state.cursorPosition--;
-            // LOCAL ECHO: Show backspace for immediate user feedback
-            this.terminal.write('\b \b');
+
+            // LOCAL ECHO: Handle mid-line backspace properly
+            if (this.state.cursorPosition === this.state.currentLine.length) {
+                // Cursor at end after deletion - simple backspace
+                this.terminal.write('\b \b');
+            } else {
+                // Cursor in middle after deletion - redraw remaining text
+                const remainingText = this.state.currentLine.slice(this.state.cursorPosition);
+                // Move back one position, write remaining text + space to clear, then reposition
+                this.terminal.write('\b' + remainingText + ' ');
+                // Move cursor back to correct position (after deletion point)
+                const moveBackCount = remainingText.length + 1;
+                if (moveBackCount > 0) {
+                    this.terminal.write('\x1b[' + moveBackCount + 'D');
+                }
+            }
         }
     }
     /**
