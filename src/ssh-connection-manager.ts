@@ -710,10 +710,8 @@ export class SSHConnectionManager implements ISSHConnectionManager {
             this.broadcastToLiveListenersRaw(sessionData.connection.name, commandWithoutPrompt, source);
             sessionData.isAtPrompt = false; // No longer at prompt - command is executing
           } else {
-            // Terminal is not at prompt - send prompt + command
-            const prompt = this.formatPrompt(sessionData);
-            const commandWithPrompt = `${prompt} ${commandEntry.command}\r\n`;
-            this.broadcastToLiveListenersRaw(sessionData.connection.name, commandWithPrompt, source);
+            // Terminal is not at prompt - send command only
+            this.broadcastToLiveListenersRaw(sessionData.connection.name, `${commandEntry.command}\r\n`, source);
           }
           this.storeCommandInHistory(sessionData.connection.name, commandEntry.command, source);
 

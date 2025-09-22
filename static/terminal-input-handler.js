@@ -130,26 +130,26 @@ class TerminalInputHandler {
             case '\x1b[D': // Left arrow
                 if (this.state.cursorPosition > 0) {
                     this.state.cursorPosition--;
-                    // ECHO FIX: Removed local cursor echo - SSH server handles cursor movement
+                    this.terminal.write('\x1b[D'); // Local cursor movement with visual feedback
                 }
                 break;
             case '\x1b[C': // Right arrow
                 if (this.state.cursorPosition < this.state.currentLine.length) {
                     this.state.cursorPosition++;
-                    // ECHO FIX: Removed local cursor echo - SSH server handles cursor movement
+                    this.terminal.write('\x1b[C'); // Local cursor movement with visual feedback
                 }
                 break;
             case '\x1b[H': // Home key
             case '\x1b[1~':
                 const movesToStart = this.state.cursorPosition;
                 this.state.cursorPosition = 0;
-                // ECHO FIX: Removed local cursor movement echo - SSH server handles this
+                this.terminal.write('\x1b[H'); // Local cursor movement with visual feedback
                 break;
             case '\x1b[F': // End key
             case '\x1b[4~':
                 const movesToEnd = this.state.currentLine.length - this.state.cursorPosition;
                 this.state.cursorPosition = this.state.currentLine.length;
-                // ECHO FIX: Removed local cursor movement echo - SSH server handles this
+                this.terminal.write('\x1b[F'); // Local cursor movement with visual feedback
                 break;
             // Ignore other escape sequences to prevent terminal manipulation
         }
@@ -221,16 +221,7 @@ class TerminalInputHandler {
             if (message.type === 'terminal_output' && message.data) {
                 let outputData = message.data;
                 
-                // TARGETED ECHO SUPPRESSION: Only remove duplicate command, keep all prompts
-                // Look for pattern: "$ command\r\n" at the start and remove just the command part
-                if (this.lastSubmittedCommand && this.lastSubmittedCommand.trim().length > 0) {
-                    // Escape the command for regex and look for it after "$ "
-                    const escapedCommand = this.lastSubmittedCommand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                    const commandOnlyPattern = new RegExp(`\\$\\s${escapedCommand}\\r?\\n`, 'g');
-                    outputData = outputData.replace(commandOnlyPattern, '$\r\n'); 
-                }
-                
-                // Write processed output to terminal
+                // Direct passthrough - server controls all output
                 this.terminal.write(outputData);
             }
         }
