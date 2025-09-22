@@ -617,7 +617,7 @@ export class SSHConnectionManager implements ISSHConnectionManager {
     const executionStartTime = Date.now();
 
     // Browser commands (source: 'user') wait forever, MCP commands have timeout
-    const timeoutMs = commandEntry.options.source === 'user' ? null : (commandEntry.options.timeout || 15000);
+    const timeoutMs = commandEntry.options.source === 'user' ? null : commandEntry.options.timeout || null;
 
     // Use exec() for reliable completion detection via close events
     sessionData.client.exec(commandEntry.command, (err, stream) => {
