@@ -23,13 +23,13 @@
     "precommit": "npm run ci-validate"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.17.4",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@types/express": "^5.0.3",
     "@types/ws": "^8.18.1",
     "axios": "^1.12.2",
     "express": "^5.1.0",
     "node-fetch": "^3.3.2",
-    "puppeteer": "^24.20.0",
+    "puppeteer": "^25.16.0",
     "ssh2": "^1.15.0"
   },
   "devDependencies": {
